@@ -1,0 +1,74 @@
+{
+    "name": "containerui",
+    "version": "1.0.0-beta.1",
+    "description": "A reactive UI framework for Minecraft Bedrock container interfaces — signals, components, hooks and JSX, with a scheduler that respects the tick budget. Not an official Minecraft product; not approved by or associated with Mojang or Microsoft.",
+    "type": "module",
+    "license": "MIT",
+    "author": "vigenersl",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/VigeNerSl/ContainerUI.git"
+    },
+    "homepage": "https://github.com/VigeNerSl/ContainerUI#readme",
+    "bugs": {
+        "url": "https://github.com/VigeNerSl/ContainerUI/issues"
+    },
+    "keywords": [
+        "minecraft",
+        "bedrock",
+        "script-api",
+        "ui",
+        "reactive",
+        "signals",
+        "jsx"
+    ],
+    "main": "./dist/ContainerFormData.js",
+    "types": "./dist/ContainerFormData.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/ContainerFormData.d.ts",
+            "default": "./dist/ContainerFormData.js"
+        },
+        "./jsx-runtime": {
+            "types": "./dist/jsx-runtime.d.ts",
+            "default": "./dist/jsx-runtime.js"
+        },
+        "./core": {
+            "types": "./dist/core/index.d.ts",
+            "default": "./dist/core/index.js"
+        }
+    },
+    "files": [
+        "dist",
+        "pack",
+        "documentation",
+        "README.md",
+        "README.ru.md",
+        "CHANGELOG.md",
+        "TRADEMARKS.md"
+    ],
+    "scripts": {
+        "build": "tsc -p tsconfig.json && node tools/copy-dist-files.mjs",
+        "prepack": "npm run build && npm run generate:pack",
+        "check:layers": "node tools/check-layers.mjs",
+        "check:version": "node tools/check-version.mjs",
+        "check:license": "node tools/check-license.mjs",
+        "generate:pack": "node tools/generate-pack.mjs",
+        "smoke": "node tools/smoke/vendored.mjs",
+        "smoke:itemguard": "node tools/smoke/itemguard.mjs",
+        "smoke:interaction": "node tools/smoke/interaction/index.mjs",
+        "smoke:form": "node tools/smoke/containerform.mjs",
+        "smoke:core": "node tools/smoke/core/index.mjs",
+        "test": "node tools/optional.mjs test",
+        "typecheck": "tsc -p tsconfig.json --noEmit",
+        "build:release": "npm run build && node tools/build-release.mjs",
+        "verify": "npm run build && npm run check:layers && npm run check:version && npm run check:license && npm run test && npm run smoke && npm run smoke:itemguard && npm run smoke:interaction && npm run smoke:form && npm run smoke:core && npm run typecheck && npm run generate:pack"
+    },
+    "peerDependencies": {
+        "@minecraft/server": "^2.9.0"
+    },
+    "devDependencies": {
+        "@minecraft/server": "2.9.0",
+        "typescript": "^5.7.2"
+    }
+}

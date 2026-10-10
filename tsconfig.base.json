@@ -1,0 +1,26 @@
+{
+    "compilerOptions": {
+        "target": "ES2022",
+        "lib": ["ES2022"],
+        // Node16 resolution keeps us honest: every relative import must carry its .js
+        // extension, which is exactly what Bedrock's module loader requires.
+        "module": "Node16",
+        "moduleResolution": "Node16",
+        "strict": true,
+        "noUncheckedIndexedAccess": true,
+        "noImplicitOverride": true,
+        "noFallthroughCasesInSwitch": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+        "noImplicitReturns": true,
+        "exactOptionalPropertyTypes": true,
+        "isolatedModules": true,
+        "verbatimModuleSyntax": true,
+        "declaration": true,
+        "declarationMap": true,
+        "sourceMap": true,
+        "skipLibCheck": true,
+        "jsx": "react-jsx",
+        "jsxImportSource": "containerui"
+    }
+}

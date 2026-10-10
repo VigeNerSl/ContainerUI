@@ -1,0 +1,172 @@
+/** A stub `@minecraft/server` for the core suite: stacks, events fired by hand, and kept timers. */
+
+export class ItemStack {
+    constructor(typeId, amount = 1) {
+        this.typeId = typeId;
+        this.amount = amount;
+        this.nameTag = undefined;
+        this._lore = [];
+        this._props = new Map();
+    }
+    getLore() { return [...this._lore]; }
+    setLore(lore) { this._lore = lore ? [...lore] : []; }
+    getDynamicProperty(id) { return this._props.get(id); }
+    setDynamicProperty(id, value) {
+        if (value === undefined) this._props.delete(id);
+        else this._props.set(id, value);
+    }
+    getDynamicPropertyIds() { return [...this._props.keys()]; }
+    clone() {
+        const copy = new ItemStack(this.typeId, this.amount);
+        copy.nameTag = this.nameTag;
+        copy._lore = [...this._lore];
+        copy._props = new Map(this._props);
+        copy.enchantment = this.enchantment;
+        return copy;
+    }
+    getComponent() { return undefined; }
+}
+
+/** Potion effects the stub knows, namespaced as the engine registers them. */
+const POTION_EFFECTS = new Set(["minecraft:fire_resistance", "minecraft:healing", "minecraft:strong_healing"]);
+
+/** The item each delivery builds, as the engine's deliveries do. */
+const POTION_ITEM_BY_DELIVERY = {
+    Consume: "minecraft:potion",
+    ThrownSplash: "minecraft:splash_potion",
+    ThrownLingering: "minecraft:lingering_potion",
+};
+
+/** Builds potions the way the engine does: from an effect and a delivery, never from a data value. */
+export const Potions = {
+    getAllEffectTypes: () => [...POTION_EFFECTS].map((id) => ({ id })),
+    getAllDeliveryTypes: () => Object.keys(POTION_ITEM_BY_DELIVERY).map((id) => ({ id })),
+    getEffectType: (id) => (POTION_EFFECTS.has(id) ? { id } : undefined),
+    getDeliveryType: (id) => ({ id }),
+    resolve: (effect, delivery) => {
+        const effectId = typeof effect === "string" ? effect : effect.id;
+        const deliveryId = typeof delivery === "string" ? delivery : delivery.id;
+        if (!POTION_EFFECTS.has(effectId)) throw new Error(`InvalidPotionEffectTypeError: ${effectId}`);
+        const itemId = POTION_ITEM_BY_DELIVERY[deliveryId];
+        if (!itemId) throw new Error(`InvalidPotionDeliveryTypeError: ${deliveryId}`);
+        const stack = new ItemStack(itemId);
+        stack.potion = { effectId, deliveryId };
+        return stack;
+    },
+};
+
+/** Subscribers by `after:<event>` and `before:<event>`. Every event exists; none fires by itself. */
+export const __subscribers = new Map();
+const events = (kind) =>
+    new Proxy({}, {
+        get: (target, name) => ({
+            subscribe: (callback) => {
+                const key = kind + ":" + String(name);
+                __subscribers.set(key, [...(__subscribers.get(key) ?? []), callback]);
+                return callback;
+            },
+            unsubscribe: (callback) => {
+                const key = kind + ":" + String(name);
+                __subscribers.set(key, (__subscribers.get(key) ?? []).filter((known) => known !== callback));
+            },
+        }),
+    });
+
+/** Loot tables the stub knows, and what each roll produces. A table's rolls are counted. */
+export const __lootRolls = new Map();
+const LOOT_TABLES = {
+    "stub/fire_arrow": () => {
+        const stack = new ItemStack("minecraft:arrow", 3);
+        stack.localizationKey = "tipped_arrow.effect.fireResistance";
+        return [stack];
+    },
+    "stub/empty": () => [],
+};
+
+/** World dynamic properties, kept as the engine keeps them: by identifier. */
+const worldProperties = new Map();
+
+export const world = {
+    getDynamicProperty: (identifier) => worldProperties.get(identifier),
+    setDynamicProperty: (identifier, value) => {
+        if (value === undefined) worldProperties.delete(identifier);
+        else worldProperties.set(identifier, value);
+    },
+    afterEvents: events("after"),
+    beforeEvents: events("before"),
+    getEntity: () => undefined,
+    getAllPlayers: () => [],
+    getDimension: () => {
+        throw new Error("no dimensions in the stub");
+    },
+    getLootTableManager: () => ({
+        getLootTable: (path) => (LOOT_TABLES[path] ? { path } : undefined),
+        generateLootFromTable: (table) => {
+            __lootRolls.set(table.path, (__lootRolls.get(table.path) ?? 0) + 1);
+            return LOOT_TABLES[table.path]();
+        },
+    }),
+};
+
+export const EquipmentSlot = { Head: "Head", Chest: "Chest", Legs: "Legs", Feet: "Feet", Offhand: "Offhand", Mainhand: "Mainhand", Body: "Body" };
+
+export const EnchantmentTypes = { get: (id) => ({ id, maxLevel: 5 }) };
+
+/**
+ * Blocks the stub resolves, with the states they accept. A bed is deliberately absent: the engine
+ * refuses `minecraft:bed` with a colour, since a bed's colour is entity data, not a state.
+ */
+const BLOCK_STATES = {
+    "minecraft:dropper": ["facing_direction"],
+    "minecraft:brown_mushroom_block": ["huge_mushroom_bits"],
+    "minecraft:air": [],
+    "minecraft:dispenser": ["facing_direction"],
+    "minecraft:redstone_block": [],
+};
+
+/** Block permutations, and the item form a block item is built from. */
+export const BlockPermutation = {
+    resolve: (typeId, states = {}) => {
+        const known = BLOCK_STATES[typeId];
+        if (!known) throw new Error(`Failed to resolve block "${typeId}"`);
+        for (const name of Object.keys(states)) {
+            if (!known.includes(name)) throw new Error(`InvalidBlockStateError: ${typeId} has no state "${name}"`);
+        }
+        return {
+            type: { id: typeId },
+            getAllStates: () => ({ ...states }),
+            getItemStack: (amount = 1) => {
+                const stack = new ItemStack(typeId, amount);
+                stack.blockStates = { ...states };
+                return stack;
+            },
+        };
+    },
+};
+
+/** Interval callbacks, kept so a test can drive a scan pass by hand. */
+export const __intervals = [];
+
+/** Timeouts, kept so a test can fire them by hand. Ids stay 0: only intervals are cleared by id. */
+export const __timeouts = [];
+
+/** `deferRuns` queues `system.run` callbacks in `queue` instead of running them at once. */
+export const __runs = { deferRuns: false, queue: [] };
+
+export const system = {
+    currentTick: 0,
+    run: (callback) => {
+        if (__runs.deferRuns) __runs.queue.push(callback);
+        else callback();
+        return 0;
+    },
+    runTimeout: (callback, delay) => {
+        __timeouts.push({ callback, delay });
+        return 0;
+    },
+    waitTicks: () => Promise.resolve(),
+    runInterval: (callback) => __intervals.push(callback),
+    clearRun: (runId) => {
+        if (typeof runId === "number" && runId > 0) __intervals[runId - 1] = () => undefined;
+    },
+};

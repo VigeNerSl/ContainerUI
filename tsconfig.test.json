@@ -1,0 +1,19 @@
+{
+    "extends": "./tsconfig.base.json",
+    "compilerOptions": {
+        // Sources and tests compile into one tree so the tests exercise the real
+        // relative-import graph rather than a bundler's rewrite of it.
+        "rootDir": ".",
+        "outDir": "dist-test",
+        "declaration": false,
+        "declarationMap": false,
+        // Resolve the JSX runtime's *types* from source. Without this, elements would
+        // carry types from dist while the tests import them from src, and the two
+        // identities would not unify.
+        "paths": {
+            "containerui/jsx-runtime": ["./src/jsx-runtime.ts"],
+            "containerui": ["./src/core/index.ts"]
+        }
+    },
+    "include": ["src/**/*", "test/**/*", "types/**/*"]
+}

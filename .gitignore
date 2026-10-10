@@ -1,0 +1,10 @@
+node_modules/
+dist/
+dist-test/
+pack/
+release/
+testpack/
+*.tsbuildinfo
+
+# Vendored copies of the build, produced by tools/vendor.mjs
+examples/*/BP/scripts/ContainerUI/

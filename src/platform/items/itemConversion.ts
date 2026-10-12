@@ -28,6 +28,7 @@ import {
     MAX_LORE_LINES,
     stripLoreMarker,
 } from "./itemMarker.js";
+import { storageContainerOf } from "./storageItems.js";
 
 export { isRenderedItem };
 
@@ -284,6 +285,48 @@ const markNativeLore = (stack: ItemStack): void => {
     }
 };
 
+/**
+ * Marks a real item: the property, or the lore where a stackable item drops the property.
+ *
+ * @returns Whether the item now reads as marked.
+ */
+const markRealItem = (stack: ItemStack): boolean => {
+    if (applyDynamicMarker(stack)) return true;
+    markNativeLore(stack);
+    return isRenderedItem(stack);
+};
+
+/**
+ * Marks what a storage item, such as a bundle, holds, and what the storage items in it hold. A
+ * button's clone of a real bundle keeps its contents for the tooltip, and a player can take them out
+ * of it in the slot: marked, what comes out is a copy the sweeps remove. An item that cannot be
+ * marked is left out, and contents that cannot be written are emptied.
+ *
+ * @returns `false` when unmarked contents may remain: the clone must not be shown.
+ */
+const markStorageContents = (stack: ItemStack): boolean => {
+    const container = storageContainerOf(stack);
+    if (!container) return true;
+    try {
+        if (container.emptySlotsCount === container.size) return true;
+        for (let index = 0; index < container.size; index++) {
+            const stored = container.getItem(index);
+            if (!stored) continue;
+            const isMarked = markStorageContents(stored) && markRealItem(stored);
+            // Reads hand out copies: the marked item goes back in, or nothing does.
+            container.setItem(index, isMarked ? stored : undefined);
+        }
+        return true;
+    } catch {
+        try {
+            container.clearAll();
+            return true;
+        } catch {
+            return false;
+        }
+    }
+};
+
 /** Replaces a real item's enchantments with the ones the view asks for, when they differ. */
 const replaceEnchantments = (stack: ItemStack, enchantments: readonly ItemEnchantment[] | undefined): void => {
     if (!enchantments || areEnchantmentsEqual(readEnchantments(stack), enchantments)) return;
@@ -373,8 +416,12 @@ export const toItemStack = (view: ItemView | null, options: ToItemStackOptions =
     // A real item is its own stack, cloned, so enchantments and NBT survive.
     if (view.native instanceof ItemStack) {
         const clone = cloneNative(view, view.native);
-        if (options.isUiOwned && !applyDynamicMarker(clone)) markNativeLore(clone);
-        return clone;
+        if (!options.isUiOwned) return clone;
+        markRealItem(clone);
+        if (markStorageContents(clone)) return clone;
+        // Its contents would leave the menu real: shown as described, without them.
+        const { native: _native, ...described } = view;
+        return toItemStack(described, options);
     }
 
     const stack = describedStack(view);

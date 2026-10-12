@@ -68,7 +68,8 @@ in another slot of the menu, in the inventory, in an input, or on the ground if 
 then the gesture is still in progress (a drag, for instance), and firing early would run the handler
 while a duplicate exists. The consequences:
 
-- Dragging a button into the inventory, shift-clicking it, throwing it: each fires `onClick` once.
+- Dragging a button into the inventory, shift-clicking it, throwing it, putting it in a bundle: each
+  fires `onClick` once.
 - Double-clicking to collect all of one item type counts once per button actually collected.
 - If a take is never located (the engine destroyed the item), nothing fires, and the button is
   repainted after about a second.

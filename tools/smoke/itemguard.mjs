@@ -4,6 +4,7 @@
  */
 
 import { runSuite } from "./harness.mjs";
+import { checkBundles } from "./itemguard/bundles.mjs";
 
 await runSuite({ label: "anti-dupe", passed: "anti-dupe smoke ok", crashed: "anti-dupe smoke failed", engine: "itemguard.js" }, async ({ check, load, loadEngine }) => {
     const { ItemStack, world } = await loadEngine();
@@ -474,6 +475,8 @@ await runSuite({ label: "anti-dupe", passed: "anti-dupe smoke ok", crashed: "ant
         check("the copies cleaned around an unreadable slot are counted", removed === 2, `removed=${removed}`);
         check("a copy after the unreadable slot is still swept", equipment.Offhand === undefined, JSON.stringify(equipment.Offhand));
     }
+
+    await checkBundles({ check, load, ItemStack, toItemStack, world, onMarkedItemDestroyed, itemEntity });
 
     // The engine allows 20 lore lines of 50 characters: the fallback marker must fit in them.
     {

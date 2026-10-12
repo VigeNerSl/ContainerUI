@@ -236,9 +236,8 @@ export class BedrockSurface implements HostAdapter {
         const isUiOwned = !this.#playerWritable.has(index);
         try {
             const stack = toItemStack(item, { isUiOwned });
-            container.setItem(index, stack);
+            this.#scanner.writeSlot({ container, index, stack, isUiOwned });
             this.#written.record({ index, item, isUiOwned, stack });
-            this.#scanner.invalidate(index);
         } catch (error) {
             this.#reportError(`Failed to write slot ${index}: ${String(error)}`);
         }
@@ -410,6 +409,7 @@ export class BedrockSurface implements HostAdapter {
     #handBackAndRemove(): void {
         this.#viewer.discardMarkedCursor();
         this.#revocations.settle();
+        this.#scanner.rescueStorageButtons();
         returnStrandedItems({
             container: this.#container(),
             slotCount: this.slotCount,

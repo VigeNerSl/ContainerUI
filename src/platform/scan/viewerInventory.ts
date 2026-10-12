@@ -7,7 +7,8 @@ import { inventoryContainerOf } from "../storage/inventoryContainer.js";
 import { onPlayerInventoryChange } from "./inventoryChanges.js";
 import { fromItemStack, toStorageStack } from "../items/itemConversion.js";
 import { isRenderedItem } from "../items/itemMarker.js";
-import { scrubInventoryOf } from "../items/itemGuard.js";
+import { scrubInventoryOf, scrubStorageItem } from "../items/itemGuard.js";
+import { takeOwnItemsOut } from "../items/storageItems.js";
 import { probeOfHandle, probeOfStack, slotHandlesOf } from "./slotHandles.js";
 import type { SlotProbe } from "./slotMatching.js";
 
@@ -153,7 +154,9 @@ export class ViewerInventory {
             const stack = container.getItem(index);
             if (!stack) return;
             if (stack.amount <= amount) {
+                const own = isRenderedItem(stack) ? takeOwnItemsOut(stack) : [];
                 container.setItem(index, undefined);
+                this.returnOwnItems(own);
                 return;
             }
             const remainder = stack.clone();
@@ -196,6 +199,20 @@ export class ViewerInventory {
             this.#onError(`Failed to return an item to the player: ${String(error)}`);
             return null;
         }
+    }
+
+    /**
+     * Gives the player back their own items, taken out of a copy the menu wrote, such as a bundle on
+     * a button they put an item in.
+     *
+     * @param stacks The items, unmarked.
+     */
+    returnOwnItems(stacks: readonly ItemStack[]): void {
+        stacks.forEach((stack) => {
+            const view = fromItemStack(stack);
+            const place = view ? this.returnItem(null, view) : null;
+            this.#onTrace(`own-item-returned item=${stack.typeId} amount=${stack.amount} to=${place ?? "lost"}`);
+        });
     }
 
     /** What the viewer holds on the cursor, or `null`. */
@@ -241,8 +258,10 @@ export class ViewerInventory {
             const cursor = this.#cursor();
             const stack = cursor?.item;
             if (!cursor || !stack || !isRenderedItem(stack)) return;
+            const own = takeOwnItemsOut(stack);
             cursor.clear();
             this.#onTrace(`cursor-discarded item=${stack.typeId}`);
+            this.returnOwnItems(own);
         } catch {
             // A read-only window, or the player is gone; the sweeps still run.
         }
@@ -259,7 +278,9 @@ export class ViewerInventory {
             const stack = cursor?.item;
             if (!cursor || !stack || !isRenderedItem(stack)) return 0;
             const amount = stack.amount;
+            const own = takeOwnItemsOut(stack);
             cursor.clear();
+            this.returnOwnItems(own);
             return amount;
         } catch {
             return 0;
@@ -313,14 +334,18 @@ export class ViewerInventory {
     }
 
     /**
-     * Removes rendered items from the inventory, worn slots and off hand.
+     * Removes rendered items from the inventory, worn slots and off hand, and from storage items
+     * there and on the cursor.
      *
      * @returns How many stacks were removed.
      */
     scrub(): number {
         const player = this.player;
         if (!player) return 0;
-        const removed = scrubInventoryOf(player, (probe) => this.#swept.push(probe));
+        const onRemoved = (probe: SlotProbe): void => {
+            this.#swept.push(probe);
+        };
+        const removed = scrubInventoryOf(player, onRemoved) + this.#scrubCursorStorage(onRemoved);
         if (removed > 0) {
             this.#scrubbedStacks += removed;
             this.#onTrace(`scrub-swept stacks=${removed} total=${this.#scrubbedStacks}`);
@@ -340,6 +365,30 @@ export class ViewerInventory {
     dispose(): void {
         this.#unsubscribeChanges?.();
         this.#unsubscribeChanges = null;
+    }
+
+    /**
+     * Removes rendered copies from a storage item on the cursor, such as a bundle a button was put
+     * in. The cursor can only be cleared, not written, so the cleaned item goes to the inventory.
+     */
+    #scrubCursorStorage(onRemoved: (probe: SlotProbe) => void): number {
+        try {
+            const cursor = this.#cursor();
+            const stack = cursor?.item;
+            // Nowhere to put the cleaned item back: clearing the cursor would destroy the player's own.
+            if (!cursor || !stack || isRenderedItem(stack) || !this.#container()) return 0;
+            const probes: SlotProbe[] = [];
+            const removed = scrubStorageItem(stack, (probe) => probes.push(probe));
+            const cleaned = removed > 0 ? fromItemStack(stack) : null;
+            if (!cleaned) return 0;
+            cursor.clear();
+            const place = this.returnItem(null, cleaned);
+            this.#onTrace(`cursor-storage-swept item=${stack.typeId} stacks=${removed} to=${place ?? "lost"}`);
+            probes.forEach(onRemoved);
+            return removed;
+        } catch {
+            return 0;
+        }
     }
 
     /**

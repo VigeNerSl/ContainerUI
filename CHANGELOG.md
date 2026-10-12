@@ -4,7 +4,8 @@ Every public release, newest first. Breaking changes are listed under their own 
 
 ## 1.0.0-beta.3 - 2026-10-12
 
-The shared packs are unchanged and stay at version `1.0.1`.
+The shared packs keep version `1.0.1`. The settings text of ContainerUI BP now shows the pack version
+rather than the library's, so a release that leaves the packs alone builds them byte for byte the same.
 
 - **Fixed a duplication through bundles.** A menu button put in a bundle stayed there as an item:
   the sweeps never looked inside storage items, so the menu repainted the button and the copy

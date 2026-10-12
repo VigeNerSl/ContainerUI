@@ -22,7 +22,7 @@ import {
 import { readFileSync } from "node:fs";
 import { writeJsonOutput, writeOutput } from "./files.mjs";
 import { FLAT_GLASS_COUNT, writeFlatGlass } from "./flat-glass.mjs";
-import { COPYRIGHT, LIBRARY_VERSION, PACK_VERSION, REPOSITORY_URL, buildManifest } from "./pack-manifest.mjs";
+import { COPYRIGHT, PACK_VERSION, REPOSITORY_URL, buildManifest } from "./pack-manifest.mjs";
 
 const OUTPUT_ROOT = process.argv[2] ?? "pack";
 
@@ -52,8 +52,10 @@ const LICENSE_TEXT = readFileSync(new URL("../LICENSE", import.meta.url));
 const REPOSITORY_LABEL = REPOSITORY_URL.replace(/^https:\/\//, "");
 const BEHAVIOUR_DESCRIPTION = "§7Shared by every add-on built on ContainerUI: the menu and storage entities and the flat glass blocks. No scripts.";
 const RESOURCE_DESCRIPTION = "§7Shared by every add-on built on ContainerUI: the container screen layouts, hover text on touch and the flat glass textures.";
+// The pack version, not the library's: add-ons built on different library versions share these packs,
+// and a release that leaves them alone must build them byte for byte the same.
 const SETTINGS_TEXT = [
-    `§aContainerUI §f${LIBRARY_VERSION}`,
+    `§aContainerUI packs §f${PACK_VERSION.join(".")}`,
     "§7The menu and storage entities, the screen layouts and the flat glass blocks every ContainerUI add-on shares.",
     "",
     `§7GitHub: ${REPOSITORY_LABEL}`,

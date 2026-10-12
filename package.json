@@ -1,6 +1,6 @@
 {
     "name": "containerui",
-    "version": "1.0.0-beta.1",
+    "version": "1.0.0-beta.2",
     "description": "A reactive UI framework for Minecraft Bedrock container interfaces — signals, components, hooks and JSX, with a scheduler that respects the tick budget. Not an official Minecraft product; not approved by or associated with Mojang or Microsoft.",
     "type": "module",
     "license": "MIT",

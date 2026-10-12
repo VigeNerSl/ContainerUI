@@ -4,11 +4,15 @@ import { readFileSync } from "node:fs";
 
 const PACKAGE = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
-/** The library version as `package.json` writes it, such as `1.0.0-beta.1`. */
+/** The library version as `package.json` writes it, such as `1.0.0-beta.2`. */
 export const LIBRARY_VERSION = PACKAGE.version;
 
-/** The library version without its pre-release tag: `1.0.0-beta.1` is pack version `[1, 0, 0]`. */
-export const PACK_VERSION = LIBRARY_VERSION.split("-")[0].split(".").map(Number);
+/**
+ * The version of the shared packs, counted apart from the library's. A client keeps a pack it has
+ * downloaded or imported under its UUID and version, so raise it with every release that changes
+ * what the packs contain, or players keep the previous copy.
+ */
+export const PACK_VERSION = [1, 0, 1];
 
 export const MIN_ENGINE_VERSION = (process.env.CUI_MIN_ENGINE ?? "1.26.20").split(".").map(Number);
 

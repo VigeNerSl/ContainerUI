@@ -156,10 +156,10 @@ builds a counter and a small shop step by step.
 
 ## Status
 
-`1.0.0-beta.1` is the first public release. Menus, block containers, modals, loading states, pages and
-quantities have been run in a live world on a computer and on a phone, and the core and the interaction
-logic are covered by automated checks. It is a beta: the API may still change before 1.0, and every
-breaking change will be listed in the changelog.
+`1.0.0-beta.2` is the current release; the first public one was `1.0.0-beta.1`. Menus, block containers,
+modals, loading states, pages and quantities have been run in a live world on a computer and on a phone,
+and the core and the interaction logic are covered by automated checks. It is a beta: the API may still
+change before 1.0, and every breaking change will be listed in the changelog.
 
 Known limitations:
 

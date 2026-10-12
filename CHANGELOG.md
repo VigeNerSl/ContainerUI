@@ -2,7 +2,10 @@
 
 Every public release, newest first. Breaking changes are listed under their own heading.
 
-## Unreleased
+## 1.0.0-beta.2 - 2026-10-12
+
+The shared packs are version `1.0.1`. Their version is now counted apart from the library's and goes
+up whenever a release changes them, so a game that kept pack `1.0.0` downloads or imports the new one.
 
 - **Hover text on touch.** On a phone, a slot now shows its name and lore under the finger, in
   ContainerUI menus and in vanilla container screens: chests, the inventory, furnaces and the rest.

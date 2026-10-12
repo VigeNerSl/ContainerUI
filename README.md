@@ -55,7 +55,8 @@ Requirements:
 ### 1. Install the packs
 
 The packs hold the menu entity, the block storage entity, the screen layouts and the 17 flat glass
-blocks, and contain no scripts. Get the package and copy them into your game:
+blocks, and contain no scripts. The resource pack also shows hover text on touch in every container
+screen of the world, vanilla ones included. Get the package and copy them into your game:
 
 ```bash
 npm install containerui

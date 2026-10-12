@@ -2,6 +2,17 @@
 
 Every public release, newest first. Breaking changes are listed under their own heading.
 
+## Unreleased
+
+- **Hover text on touch.** On a phone, a slot now shows its name and lore under the finger, in
+  ContainerUI menus and in vanilla container screens: chests, the inventory, furnaces and the rest.
+  Before, a menu button's lore never showed on touch, since a tap is a click. The ContainerUI RP
+  gains `ui/ui_common.json`, which changes the vanilla `common` namespace: the held item's own hover
+  text, the selected slot frame and the item details panel are hidden, since they repeated it.
+- **Mouse scrollbar on touch.** Scrolling container grids (menus from 63 slots, the recipe book, the
+  creative inventory) use the mouse scrollbar on every device, and a swipe over the grid moves the
+  hover instead of scrolling. The touch scrollbar did not fit the menu's scrollbar backdrop.
+
 ## 1.0.0-beta.1 - 2026-10-10
 
 First public release.

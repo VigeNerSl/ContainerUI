@@ -152,6 +152,7 @@ packs** that contain no scripts, and every add-on built on ContainerUI uses the 
 | ContainerUI BP | `entities/rideable_entity.json` | The menu entity (`containerui:rideable_entity`), with one inventory group per supported size. |
 | ContainerUI BP | `entities/block_storage_entity.json` | The storage entity of [block containers](../guides/block-containers.md) (`containerui:block_storage`). |
 | ContainerUI RP | `ui/chest_screen.json`, `ui/container.json`, `ui/pocket_containers.json`, `ui/_ui_defs.json` | The screen layouts. The layout is chosen by the first characters of the entity's name, which the library sets. |
+| ContainerUI RP | `ui/ui_common.json` | Touch input reads slots the way a mouse does, in every container screen of the world, vanilla ones included: hovering a slot shows its hover text, and scrolling grids use the mouse scrollbar. |
 | Both | `blocks/flat_glass*.json`, their model, textures and names | Seventeen flat glass blocks for seamless borders and backdrops; see [Flat glass](../guides/flat-glass.md). |
 
 Entity ids and UI files are global to a world. If every add-on carried its own copy of these files,

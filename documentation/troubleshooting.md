@@ -28,6 +28,10 @@ of `rideable_entity.json` of its own. See [Installation → Pack assets](getting
 is not active in the world, or another pack replaces its `ui/chest_screen.json` or `ui/container.json`
 and wins.
 
+**On a phone, a slot shows no name or lore under the finger.** The shared ContainerUI RP is not active,
+the phone still runs a cached copy of an older version of it, or another pack that changes
+`highlight_slot_panel` in `ui/ui_common.json` is listed above it.
+
 **Opening from `beforeEvents` fails.** It should not: a spawn the read-only window refuses is retried
 on the next tick, up to 5 attempts in all. `spawn-failed` in `onMountEvent` has two causes. A real spawn
 error is also reported as a `platform-error` diagnostic, `Failed to spawn the surface entity: …`, with

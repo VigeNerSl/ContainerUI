@@ -51,7 +51,7 @@ const PACK_ICON = readFileSync(new URL("../assets/avatar.png", import.meta.url))
 const LICENSE_TEXT = readFileSync(new URL("../LICENSE", import.meta.url));
 const REPOSITORY_LABEL = REPOSITORY_URL.replace(/^https:\/\//, "");
 const BEHAVIOUR_DESCRIPTION = "§7Shared by every add-on built on ContainerUI: the menu and storage entities and the flat glass blocks. No scripts.";
-const RESOURCE_DESCRIPTION = "§7Shared by every add-on built on ContainerUI: the container screen layouts and the flat glass textures.";
+const RESOURCE_DESCRIPTION = "§7Shared by every add-on built on ContainerUI: the container screen layouts, hover text on touch and the flat glass textures.";
 const SETTINGS_TEXT = [
     `§aContainerUI §f${LIBRARY_VERSION}`,
     "§7The menu and storage entities, the screen layouts and the flat glass blocks every ContainerUI add-on shares.",
@@ -198,6 +198,46 @@ const buildChestScreen = () => {
     };
 };
 
+/**
+ * Shows a hovered slot's highlight and hover text with touch input as well as with a mouse. Vanilla
+ * binds them to `#show_persistent_bundle_hover_text` alone, and touch never shows them; a tap on a
+ * menu button is a click, so without them its name and lore never show on a phone.
+ */
+const TOUCH_HOVER = {
+    modifications: [
+        { array_name: "bindings", operation: "remove", where: { binding_name: "#show_persistent_bundle_hover_text" } },
+        {
+            array_name: "bindings",
+            operation: "insert_back",
+            value: [
+                { binding_name: "#show_persistent_bundle_hover_text" },
+                { binding_name: "#using_touch" },
+                { binding_type: "view", source_property_name: "(#show_persistent_bundle_hover_text or #using_touch)", target_property_name: "#visible" },
+            ],
+        },
+    ],
+};
+
+/**
+ * Makes container screens read a slot the way a computer does, on touch too: hovering a slot shows
+ * its hover text, and a scrolling grid has the mouse scrollbar. The file sits at the vanilla path, so
+ * it merges into the `common` namespace of every screen, vanilla chests and the inventory included.
+ */
+const buildCommonTouch = () => ({
+    namespace: "common",
+    "highlight_slot_panel/highlight": TOUCH_HOVER,
+    "highlight_slot_panel/white_border": TOUCH_HOVER,
+    // The held item's hover text and the item details panel repeat the hovered slot's hover text under
+    // the finger, and the selected slot frame marks a slot the highlight already marks.
+    "inventory_icon_panel/hover_text": { ignored: true },
+    slot_selected: { ignored: true },
+    "selected_item_details/item_panel_image": { visible: false },
+    // Only container screens use this panel. Under it the mouse scrollbar replaces the touch one, which
+    // is wider and drawn as a full-height box, and a swipe over the grid moves the hover instead of
+    // scrolling.
+    container_scroll_panel: { $touch: false },
+});
+
 /** The `container` namespace the chest screen references: a label, a grid and a top half per size, and two root panels. */
 const buildContainerNamespace = () => {
     const namespace = {
@@ -324,19 +364,18 @@ const buildPocketContainers = () => ({
 });
 
 /**
- * Checks that every `container.*` control the chest screen names is defined.
+ * Checks that every `container.*` control the chest screen or the namespace itself names is defined.
  *
- * @throws {Error} When the chest screen names a `container.*` control that `ui/container.json` does not define.
+ * @throws {Error} When either file names a `container.*` control that `ui/container.json` does not define.
  */
 const assertScreenResolves = ({ chestScreen, containerNamespace }) => {
     const defined = new Set(Object.keys(containerNamespace).map((key) => key.split("@")[0]));
-    const dangling = chestScreen.small_chest_screen.modifications
-        .flatMap((modification) => modification.value)
-        .flatMap((variables) => Object.entries(variables))
-        .find(([, value]) => typeof value === "string" && value.startsWith("container.") && !defined.has(value.slice("container.".length)));
+    const files = { "chest_screen.json": chestScreen, "ui/container.json": containerNamespace };
+    const dangling = Object.entries(files)
+        .flatMap(([file, value]) => [...JSON.stringify(value).matchAll(/container\.(\w+)/g)].map(([reference, name]) => ({ file, reference, name })))
+        .find(({ name }) => !defined.has(name));
     if (!dangling) return;
-    const [name, value] = dangling;
-    throw new Error(`chest_screen.json sets ${name} to ${value}, which ui/container.json does not define.`);
+    throw new Error(`${dangling.file} names ${dangling.reference}, which ui/container.json does not define.`);
 };
 
 console.log(`\n  generating pack assets into ${OUTPUT_ROOT}/\n`);
@@ -369,12 +408,13 @@ write(
 const chestScreen = buildChestScreen();
 const containerNamespace = buildContainerNamespace();
 assertScreenResolves({ chestScreen, containerNamespace });
-// chest_screen.json and pocket_containers.json sit at vanilla paths and merge into the vanilla
-// files, so only the new file is listed.
+// chest_screen.json, pocket_containers.json and ui_common.json sit at vanilla paths and merge into
+// the vanilla files, so only the new file is listed.
 write("RP/ui/_ui_defs.json", { ui_defs: ["ui/container.json"] });
 write("RP/ui/container.json", containerNamespace);
 write("RP/ui/chest_screen.json", chestScreen);
 write("RP/ui/pocket_containers.json", buildPocketContainers());
+write("RP/ui/ui_common.json", buildCommonTouch());
 writeFlatGlass({ root: OUTPUT_ROOT });
 writeOutput({ root: OUTPUT_ROOT, relativePath: "BP/pack_icon.png", contents: PACK_ICON });
 writeOutput({ root: OUTPUT_ROOT, relativePath: "RP/pack_icon.png", contents: PACK_ICON });

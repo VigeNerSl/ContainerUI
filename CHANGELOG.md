@@ -2,6 +2,22 @@
 
 Every public release, newest first. Breaking changes are listed under their own heading.
 
+## Unreleased
+
+- **Fixed a duplication through bundles.** A menu button put in a bundle stayed there as an item:
+  the sweeps never looked inside storage items, so the menu repainted the button and the copy
+  survived. The sweeps now open bundles, nested ones included, in the inventory, the worn slots and
+  the off hand, in containers the guard sweeps, and on the cursor. A bundle on the cursor goes to the
+  inventory once cleaned, since the cursor cannot be written. A bundle thrown with a copy in it is
+  replaced by a clean one. The player's own items in the bundle stay.
+- **Fixed a duplication through a real bundle on a button.** A button showing a real bundle
+  (`native`) held real items, which a player could take out of it in the slot, again after every
+  repaint. Every item in a storage item on a button is now marked, so what comes out is a copy; the
+  tooltip still lists the contents. A bundle button that changed is written again.
+- **Fixed the loss of an item put in a bundle on a button.** It went down with the button when the
+  button was reclaimed or the menu closed. A check every half second now gives it back and repaints
+  the button, and repaints, reclaims, sweeps, the world guard and closing take it out first.
+
 ## 1.0.0-beta.2 - 2026-10-12
 
 The shared packs are version `1.0.1`. Their version is now counted apart from the library's and goes

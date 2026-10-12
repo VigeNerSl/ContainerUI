@@ -11,7 +11,8 @@ Use it to check a change in the game, which the automated checks cannot do, or t
 - `main.js` registers the chat commands and the stick interaction.
 - `scenarios/` has one file per group of scenarios: clicks and restores, inputs, 126 slots, layouts,
   routing, animation, the fluent builder, enchantments, a modal and loading states, a shop with pages
-  and quantities, selling, potions, block containers, the flat glass tiles, and timing probes.
+  and quantities, selling, potions, block containers, the flat glass tiles, a real bundle on a button,
+  and timing probes.
 - `support/` has the helpers that open a menu and write the log lines.
 
 The menu titles and item names inside the scenarios are in Russian. The code and comments are in

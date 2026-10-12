@@ -1,5 +1,8 @@
 /** A stub `@minecraft/server` for the core suite: stacks, events fired by hand, and kept timers. */
 
+/** Types that store items through `minecraft:inventory`, as a bundle does, with this many slots. */
+const STORAGE_SLOTS = { "minecraft:bundle": 4 };
+
 export class ItemStack {
     constructor(typeId, amount = 1) {
         this.typeId = typeId;
@@ -7,6 +10,7 @@ export class ItemStack {
         this.nameTag = undefined;
         this._lore = [];
         this._props = new Map();
+        this._contents = STORAGE_SLOTS[typeId] ? Array.from({ length: STORAGE_SLOTS[typeId] }, () => null) : undefined;
     }
     getLore() { return [...this._lore]; }
     setLore(lore) { this._lore = lore ? [...lore] : []; }
@@ -22,9 +26,24 @@ export class ItemStack {
         copy._lore = [...this._lore];
         copy._props = new Map(this._props);
         copy.enchantment = this.enchantment;
+        copy._contents = this._contents?.map((stored) => stored?.clone() ?? null);
         return copy;
     }
-    getComponent() { return undefined; }
+    getComponent(id) {
+        if (id !== "minecraft:inventory" || !this._contents) return undefined;
+        const contents = this._contents;
+        // As the engine's: a read hands out a copy, so a change sticks only once it is set.
+        return {
+            container: {
+                size: contents.length,
+                get emptySlotsCount() { return contents.filter((stored) => !stored).length; },
+                // The engine weighs by item kind; the stub counts items, which moves the same way.
+                get weight() { return contents.reduce((sum, stored) => sum + (stored?.amount ?? 0), 0); },
+                getItem: (index) => contents[index]?.clone(),
+                setItem: (index, stored) => { contents[index] = stored ?? null; },
+            },
+        };
+    }
 }
 
 /** Potion effects the stub knows, namespaced as the engine registers them. */

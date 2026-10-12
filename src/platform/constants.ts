@@ -99,6 +99,11 @@ export const GATHER_MEMORY_TICKS = 6;
 export const MAX_REVOKE_ATTEMPTS = 6;
 /** Ticks between liveness checks. */
 export const WATCHDOG_INTERVAL_TICKS = 10;
+/**
+ * Ticks between checks of the storage items on buttons. Reading a bundle copies what it holds, so it
+ * is not done every pass; whatever destroys or overwrites one takes the player's items out first.
+ */
+export const STORAGE_BUTTON_CHECK_INTERVAL_TICKS = 10;
 /** Blocks the viewer may drift from the surface entity before it closes. */
 export const MAX_VIEW_DISTANCE = 8;
 

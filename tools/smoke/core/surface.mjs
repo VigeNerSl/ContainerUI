@@ -111,7 +111,7 @@ export const checkSurface = async ({ check, load, loadEngine, core, freshRuntime
         freshRuntime();
         const { ItemStack } = await loadEngine();
         const { BedrockSurface } = await load("platform/surface/surface.js");
-        const { fromItemStack, isRenderedItem } = await load("platform/items/itemConversion.js");
+        const { fromItemStack, isRenderedItem, toItemStack } = await load("platform/items/itemConversion.js");
 
         const surfaceInventory = makeContainer(27);
         const playerInventory = makeContainer(36);
@@ -219,6 +219,102 @@ export const checkSurface = async ({ check, load, loadEngine, core, freshRuntime
 
             viewerSurface.close("programmatic");
             check("what is never found is reported as the surface closes", revokeTraces.some((line) => line.startsWith("conflict-unresolved item=minecraft:iron_sword missing=1")), revokeTraces.join(","));
+        }
+
+        // A button put in a bundle on the cursor. The cursor can only be cleared, so the cleaned bundle
+        // goes to the inventory with the player's own items still in it.
+        {
+            const sweepTraces = [];
+            const sweepSurface = new BedrockSurface(player, { size: 27, onTrace: (line) => sweepTraces.push(line) });
+            playerInventory.slots.fill(undefined);
+            const bundle = new ItemStack("minecraft:bundle");
+            const { container: pouch } = bundle.getComponent("minecraft:inventory");
+            pouch.setItem(0, toItemStack({ typeId: "minecraft:paper", name: "Info" }));
+            pouch.setItem(1, new ItemStack("minecraft:diamond", 3));
+            cursor.item = bundle;
+
+            const removed = sweepSurface.scrubPlayerInventory();
+            const returned = playerInventory.slots.find((stack) => stack?.typeId === "minecraft:bundle");
+            const contents = returned ? [0, 1, 2, 3].map((index) => returned.getComponent("minecraft:inventory").container.getItem(index)?.typeId ?? null) : null;
+            check("a copy in a bundle on the cursor is swept", removed === 1, `removed=${removed}`);
+            check("the bundle leaves the cursor", cursor.item === undefined, JSON.stringify(cursor.item?.typeId));
+            check("and reaches the inventory with only the player's items", JSON.stringify(contents) === JSON.stringify([null, "minecraft:diamond", null, null]), JSON.stringify(contents));
+            check("in one traced step", sweepTraces.includes("cursor-storage-swept item=minecraft:bundle stacks=1 to=inventory"), sweepTraces.join(","));
+
+            const ownBundle = new ItemStack("minecraft:bundle");
+            ownBundle.getComponent("minecraft:inventory").container.setItem(0, new ItemStack("minecraft:diamond", 3));
+            cursor.item = ownBundle;
+            check("a bundle of the player's own items stays on the cursor", sweepSurface.scrubPlayerInventory() === 0 && cursor.item === ownBundle);
+            cursor.item = undefined;
+            sweepSurface.close("programmatic");
+        }
+
+        /** A real bundle holding three diamonds, as a view, and the type ids a bundle stack holds. */
+        const realBundleView = () => {
+            const real = new ItemStack("minecraft:bundle");
+            real.getComponent("minecraft:inventory").container.setItem(0, new ItemStack("minecraft:diamond", 3));
+            return fromItemStack(real);
+        };
+        const heldIn = (bundle) => {
+            const { container } = bundle.getComponent("minecraft:inventory");
+            return [0, 1, 2, 3].map((index) => container.getItem(index)?.typeId ?? null);
+        };
+
+        // A bundle on a button: an item taken out of it, or one put in, changes nothing the scan reads.
+        {
+            const { StorageButtons } = await load("platform/surface/storageButtons.js");
+            const buttons = new StorageButtons();
+            const menu = makeContainer(27);
+            const returned = [];
+            const sinkTraces = [];
+            const sink = { giveBack: (stacks) => returned.push(...stacks), trace: (line) => sinkTraces.push(line) };
+            const button = toItemStack(realBundleView(), { isUiOwned: true });
+            menu.setItem(11, button);
+            buttons.record({ index: 11, stack: button, isUiOwned: true });
+            check("an untouched bundle button costs no write", buttons.check(menu, sink) === 0);
+
+            menu.slots[11].getComponent("minecraft:inventory").container.setItem(0, undefined);
+            check("a bundle button something was taken out of is written again", buttons.check(menu, sink) === 1 && heldIn(menu.slots[11])[0] === "minecraft:diamond", JSON.stringify(heldIn(menu.slots[11])));
+
+            menu.slots[11].getComponent("minecraft:inventory").container.setItem(2, new ItemStack("minecraft:wind_charge", 4));
+            check("a bundle button the player put an item in is written again", buttons.check(menu, sink) === 1 && heldIn(menu.slots[11])[2] === null, JSON.stringify(heldIn(menu.slots[11])));
+            check("and the item goes back to the player", returned.length === 1 && returned[0].typeId === "minecraft:wind_charge" && returned[0].amount === 4);
+            check("in one traced step", sinkTraces.includes("storage-button-restored slot=11 returned=1"), sinkTraces.join(","));
+
+            // A swap for an item of the same weight reads the same; the marker still tells it apart.
+            menu.slots[11].getComponent("minecraft:inventory").container.setItem(0, new ItemStack("minecraft:diamond", 3));
+            check("a swap of equal weight is not written again", buttons.check(menu, sink) === 0);
+            buttons.rescueAll(menu, sink);
+            check("closing gives back what the player put in a bundle button", returned.length === 2 && returned[1].typeId === "minecraft:diamond" && !isRenderedItem(returned[1]) && heldIn(menu.slots[11])[0] === null, JSON.stringify(returned.map((stack) => stack.typeId)));
+
+            menu.slots[11].getComponent("minecraft:inventory").container.setItem(3, new ItemStack("minecraft:apple", 2));
+            const beforeOverwrite = buttons.takeOwnItemsAt(menu, 11);
+            check("a bundle button about to be overwritten gives up the player's item", beforeOverwrite.length === 1 && beforeOverwrite[0].typeId === "minecraft:apple");
+            check("but keeps it in the slot until the write", heldIn(menu.slots[11])[3] === "minecraft:apple");
+            check("a slot that holds no bundle button gives up nothing", buttons.takeOwnItemsAt(menu, 10).length === 0);
+
+            const inputs = new StorageButtons();
+            const input = toItemStack(realBundleView());
+            menu.setItem(12, input);
+            inputs.record({ index: 12, stack: input, isUiOwned: false });
+            menu.slots[12].getComponent("minecraft:inventory").container.setItem(1, new ItemStack("minecraft:apple", 1));
+            check("a bundle in an input is the player's own and is not watched", inputs.check(menu, sink) === 0 && heldIn(menu.slots[12])[1] === "minecraft:apple");
+        }
+
+        // A bundle button taken onto the cursor gives up what the player put in it before it goes.
+        {
+            const { ViewerInventory } = await load("platform/scan/viewerInventory.js");
+            const viewerTraces = [];
+            const viewer = new ViewerInventory(player, { onError: () => undefined, onTrace: (line) => viewerTraces.push(line) });
+            playerInventory.slots.fill(undefined);
+            const lifted = toItemStack(realBundleView(), { isUiOwned: true });
+            lifted.getComponent("minecraft:inventory").container.setItem(1, new ItemStack("minecraft:wind_charge", 4));
+            cursor.item = lifted;
+            check("the bundle copy is reclaimed from the cursor", viewer.reclaimCursor() === 1 && cursor.item === undefined);
+            const kept = playerInventory.slots.filter(Boolean).map((stack) => `${stack.typeId}x${stack.amount}${isRenderedItem(stack) ? "*" : ""}`);
+            check("and the player's item in it is returned, without the copies", JSON.stringify(kept) === JSON.stringify(["minecraft:wind_chargex4"]), JSON.stringify(kept));
+            check("with a trace", viewerTraces.some((line) => line.startsWith("own-item-returned item=minecraft:wind_charge amount=4 to=inventory")), viewerTraces.join(","));
+            viewer.dispose();
         }
 
         /** A menu entity and a viewer over fresh containers, reusing the entity and player above. */

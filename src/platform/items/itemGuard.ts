@@ -25,6 +25,7 @@ import { log } from "../../core/logging/logger.js";
 import { EQUIPPABLE_COMPONENT_ID, INVENTORY_COMPONENT_ID, ITEM_COMPONENT_ID, ITEM_ENTITY_TYPE_ID, SURFACE_ENTITY_TYPE_ID } from "../constants.js";
 import { inventoryContainerOf } from "../storage/inventoryContainer.js";
 import { isRenderedItem, stripLoreMarker } from "./itemMarker.js";
+import { addOwnItems, storageContainerOf, takeOwnItemsOut } from "./storageItems.js";
 import { probeOfStack } from "../scan/slotHandles.js";
 import type { SlotProbe } from "../scan/slotMatching.js";
 import { onUninstall, type WorldSignal } from "../lifecycle.js";
@@ -74,6 +75,9 @@ const report = (detail: string): void => {
         // A logger must not break the guard.
     }
 };
+
+/** A player's own item, taken out of a removed copy, that nothing could take. */
+const reportLost = (stack: ItemStack): void => report(`reason=sweep own-item-lost item=${stack.typeId} amount=${stack.amount}`);
 
 /** A removed copy's probe, with its lore: the one read that tells two buttons of one kind apart. */
 const removedProbeOf = (stack: ItemStack): SlotProbe => {
@@ -155,17 +159,27 @@ const destroyIfRendered = (candidate: Entity | undefined, reason: string, ownerI
     const stack = stackOf(candidate);
     if (!stack || !isRenderedItem(stack)) return false;
 
+    const { dimension, location } = candidate;
+    const own = takeOwnItemsOut(stack);
     try {
         candidate.remove();
         stats.destroyed++;
         report(`reason=${reason} item=${stack.typeId} destroyed=${stats.destroyed}`);
-        announce(removedProbeOf(stack), ownerId);
-        return true;
     } catch (error) {
         stats.removalFailed++;
         report(`reason=${reason} removal-failed error=${String(error)}`);
         return false;
     }
+    // Only once the copy is gone: the player's own items left beside it would be a second set.
+    own.forEach((ownStack) => {
+        try {
+            dimension.spawnItem(ownStack, location);
+        } catch (error) {
+            report(`reason=${reason} own-item-lost item=${ownStack.typeId} amount=${ownStack.amount} error=${String(error)}`);
+        }
+    });
+    announce(removedProbeOf(stack), ownerId);
+    return true;
 };
 
 /** Cancels an action performed with a rendered stack. */
@@ -199,10 +213,16 @@ const scrubEquipmentOf = (player: Player, onRemoved?: (probe: SlotProbe) => void
         // One unreadable slot must not hide the ones already cleaned, or the ones after it.
         try {
             const stack = equippable.getEquipment(slot);
-            if (!stack || !isRenderedItem(stack)) continue;
+            if (!stack) continue;
+            if (!isRenderedItem(stack)) {
+                removed += cleanStorageIn({ stack, write: () => equippable.setEquipment(slot, stack), onRemoved });
+                continue;
+            }
+            const own = takeOwnItemsOut(stack);
             equippable.setEquipment(slot);
             removed++;
             onRemoved?.(removedProbeOf(stack));
+            addOwnItems(inventoryContainerOf(player), own).forEach(reportLost);
         } catch {
             continue;
         }
@@ -210,21 +230,59 @@ const scrubEquipmentOf = (player: Player, onRemoved?: (probe: SlotProbe) => void
     return removed;
 };
 
-/** Removes rendered copies from a container. An empty one is left without reading a slot. */
+/** Removes rendered copies from a container, and from the storage items in it. An empty one is left without reading a slot. */
 const scrubContainer = (container: Container | null | undefined, onRemoved?: (probe: SlotProbe) => void): number => {
     let removed = 0;
     try {
         if (!container || container.emptySlotsCount === container.size) return 0;
         for (let index = 0; index < container.size; index++) {
             const stack = container.getItem(index);
-            if (!stack || !isRenderedItem(stack)) continue;
+            if (!stack) continue;
+            if (!isRenderedItem(stack)) {
+                removed += cleanStorageIn({ stack, write: () => container.setItem(index, stack), onRemoved });
+                continue;
+            }
+            const own = takeOwnItemsOut(stack);
             container.setItem(index, undefined);
             onRemoved?.(removedProbeOf(stack));
             removed++;
+            addOwnItems(container, own).forEach(reportLost);
         }
     } catch {
         // The container went mid-sweep.
     }
+    return removed;
+};
+
+/**
+ * Removes rendered copies from inside a storage item, such as a bundle, and from the storage items
+ * nested in it. A button put in a bundle leaves the menu with no trace in any slot the scan reads.
+ *
+ * @param stack Any stack. It is changed in place, so a caller that read it as a copy writes it back.
+ * @param onRemoved Called with each copy removed.
+ * @returns How many stacks were removed; 0 for an item that stores nothing.
+ */
+export const scrubStorageItem = (stack: ItemStack, onRemoved?: (probe: SlotProbe) => void): number => {
+    return scrubContainer(storageContainerOf(stack), onRemoved);
+};
+
+/**
+ * Cleans a storage item read from a slot and writes it back there. Reads hand out copies, so the
+ * cleaning sticks only once written, and the copies removed are announced only after that: a failed
+ * write leaves them for the next sweep, not counted as gone.
+ *
+ * @returns How many stacks were removed; 0 when nothing was, or the write failed.
+ */
+const cleanStorageIn = ({ stack, write, onRemoved }: { stack: ItemStack; write: () => void; onRemoved: ((probe: SlotProbe) => void) | undefined }): number => {
+    const probes: SlotProbe[] = [];
+    const removed = scrubStorageItem(stack, (probe) => probes.push(probe));
+    if (removed === 0) return 0;
+    try {
+        write();
+    } catch {
+        return 0;
+    }
+    if (onRemoved) probes.forEach(onRemoved);
     return removed;
 };
 
@@ -306,7 +364,32 @@ const onItemDropped = (vigenersl: EntityItemDropAfterEvent): void => {
         report(`reason=drop items-unreadable owner=${ownerId ?? "unknown"}`);
         return;
     }
-    dropped.forEach((item) => destroyIfRendered(item, "drop", ownerId));
+    dropped.forEach((item) => {
+        if (!destroyIfRendered(item, "drop", ownerId)) cleanThrownStorage(item, ownerId);
+    });
+};
+
+/**
+ * Replaces a thrown storage item that holds rendered copies with a clean one. A loose item's stack
+ * cannot be written, so a clean copy is spawned in its place before the old one goes: a failed spawn
+ * leaves the player's storage item where it was.
+ */
+const cleanThrownStorage = (candidate: Entity, ownerId?: string): void => {
+    if (candidate.typeId !== ITEM_ENTITY_TYPE_ID || !candidate.isValid) return;
+    const stack = stackOf(candidate);
+    if (!stack || isRenderedItem(stack)) return;
+    const probes: SlotProbe[] = [];
+    const removed = scrubStorageItem(stack, (probe) => probes.push(probe));
+    if (removed === 0) return;
+    try {
+        candidate.dimension.spawnItem(stack, candidate.location);
+        candidate.remove();
+    } catch (error) {
+        report(`reason=drop storage-respawn-failed item=${stack.typeId} error=${String(error)}`);
+        return;
+    }
+    report(`reason=drop item=${stack.typeId} swept=${removed}`);
+    probes.forEach((probe) => announce(probe, ownerId));
 };
 
 /** A loose item spawned during play. One loaded with its chunk goes through `onEntityLoaded` instead. */

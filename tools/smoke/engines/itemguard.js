@@ -14,7 +14,9 @@ const MAX_LORE_LINES = 20;
 const MAX_LORE_LINE_LENGTH = 50;
 /** The engine accepts 1 to 255 for `amount` and clamps it to the item's maximum stack size. */
 const MAX_AMOUNT = 255;
-const MAX_STACK = { "minecraft:diamond_sword": 1, "minecraft:ender_pearl": 16 };
+const MAX_STACK = { "minecraft:diamond_sword": 1, "minecraft:ender_pearl": 16, "minecraft:bundle": 1 };
+/** Types that store items through `minecraft:inventory`, as a bundle does, with this many slots. */
+const STORAGE_SLOTS = { "minecraft:bundle": 4 };
 const maxStackOf = (typeId) => MAX_STACK[typeId] ?? 64;
 
 export class ItemStack {
@@ -27,6 +29,7 @@ export class ItemStack {
         this._props = new Map();
         this._enchantments = [];
         this._damage = 0;
+        this._contents = STORAGE_SLOTS[typeId] ? Array.from({ length: STORAGE_SLOTS[typeId] }, () => null) : undefined;
     }
     get amount() { return this._amount; }
     set amount(value) {
@@ -58,10 +61,24 @@ export class ItemStack {
         copy._props = new Map(this._props);
         copy._enchantments = this._enchantments.map((entry) => ({ ...entry }));
         copy._damage = this._damage;
+        copy._contents = this._contents?.map((stored) => stored?.clone() ?? null);
         return copy;
     }
     getComponent(id) {
         const stack = this;
+        if (id === "minecraft:inventory" && this._contents) {
+            // As the engine's: a read hands out a copy, so a change sticks only once it is set.
+            return {
+                container: {
+                    size: stack._contents.length,
+                    get emptySlotsCount() { return stack._contents.filter((stored) => !stored).length; },
+                    // The engine weighs by item kind; the stub counts items, which moves the same way.
+                    get weight() { return stack._contents.reduce((sum, stored) => sum + (stored?.amount ?? 0), 0); },
+                    getItem: (index) => stack._contents[index]?.clone(),
+                    setItem: (index, stored) => { stack._contents[index] = stored ?? null; },
+                },
+            };
+        }
         if (id === "minecraft:enchantable" && ENCHANTABLE.has(this.typeId)) {
             return {
                 getEnchantments: () => stack._enchantments.map((entry) => ({ ...entry })),

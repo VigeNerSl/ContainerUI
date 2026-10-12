@@ -309,6 +309,11 @@ make room. Lore beyond those limits is cut, with one warning per item type.
   spawned it, and an empty container costs no slot reads;
 - from a player joining the world.
 
+The last three sweeps also open storage items, bundles inside bundles included, and remove the marked
+copies in them; the player's own items stay. A bundle on the cursor is cleaned the same way and moved
+to the inventory, since a script can clear the cursor but not write it. A bundle thrown with a copy in
+it is replaced by a clean one where it fell.
+
 A few paths have no script event to close them. All of them need a copy to leave the menu first,
 which the scan and the sweeps above keep to a window of a tick or two.
 
@@ -336,3 +341,15 @@ number is normal on a busy server; `destroyed` is the one that counts menu copie
 
 A shulker box item's contents cannot be read from the item in the stable API. See the
 [Shulker reader](shulker-reader.md).
+
+A bundle can be read and written, and it can be used inside a slot: a player takes items out of a
+bundle there, or puts their own in, without changing its type, amount or name, which is all the scan
+compares. So a bundle on a button is handled apart from other items:
+
+- **A real bundle** (`native`) keeps its contents on a button, so the tooltip lists them, but every
+  item in it, and in a bundle inside it, is marked. What a player takes out is a copy the sweeps
+  remove. If an item in it cannot be marked, it is left out.
+- **Every half second** a bundle button is compared with what was written. A changed one is written
+  again, and an item the player put in it goes back to them. A bundle button that is repainted,
+  reclaimed, swept, thrown or still on screen as the menu closes gives up the player's items first.
+- **`StorageView`** shows a bundle without its contents, like every display copy.

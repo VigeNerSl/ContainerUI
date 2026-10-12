@@ -6,6 +6,7 @@ import { openWithReport } from "../support/report.js";
 import { Divider, globalClicks, setBackTarget } from "../support/ui.js";
 import { ChurnTest, ClickTest, InputTest, LargeTest, LayoutTest } from "./basics.js";
 import { BenchTest } from "./bench.js";
+import { openBundleTest } from "./bundles.js";
 import { ConsumeTest } from "./consume.js";
 import { EnchantTest } from "./enchant.js";
 import { openAuctionDemo, openFormDemo } from "./forms.js";
@@ -204,7 +205,15 @@ const Hub = (props) => {
             }),
         }),
 
-        h(Divider, { index: 27 }),
+        h(HubEntry, {
+            key: "bundles",
+            index: 31,
+            typeId: "minecraft:bundle",
+            name: "§618. Настоящий мешок на кнопке",
+            run: () => openBundleTest(player),
+        }),
+
+        h(Divider, { index: 27, except: [31] }),
     );
 };
 

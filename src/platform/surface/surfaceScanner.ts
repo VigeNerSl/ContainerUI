@@ -1,12 +1,13 @@
 /** The scan loop of one surface: its pace, its cost, and the tracker it drives. */
 
-import { system, type Container, type ContainerSlot } from "@minecraft/server";
+import { system, type Container, type ContainerSlot, type ItemStack } from "@minecraft/server";
 import type { CloseReason, HostInteraction, ItemView } from "../../core/index.js";
-import { IDLE_SCAN_AFTER_PASSES, MAX_PENDING_TAKE_TICKS } from "../constants.js";
+import { IDLE_SCAN_AFTER_PASSES, MAX_PENDING_TAKE_TICKS, STORAGE_BUTTON_CHECK_INTERVAL_TICKS } from "../constants.js";
 import { ScanMeter, ScanPacer } from "../scan/scanPacing.js";
 import { InteractionTracker, type ExpectedSlots, type SlotProbe } from "../scan/scanPass.js";
 import { probeOfHandle, probeOfStack, slotHandlesOf } from "../scan/slotHandles.js";
 import type { ViewerInventory } from "../scan/viewerInventory.js";
+import { StorageButtons, type StorageButtonSink } from "./storageButtons.js";
 
 /** What the scanner needs from its surface. */
 export interface ScannerHost {
@@ -88,6 +89,8 @@ export class SurfaceScanner {
     #pendingTakes = 0;
     #passContainer: Container | null = null;
     #surfaceSlots: ContainerSlot[] | null = null;
+    readonly #storageButtons = new StorageButtons();
+    #nextStorageCheckTick = 0;
 
     /**
      * @param host The surface.
@@ -138,9 +141,29 @@ export class SurfaceScanner {
         this.#tracker.clear();
     }
 
-    /** Stops takes in flight on a repainted slot from firing; each still reclaims its copy. */
-    invalidate(index: number): void {
+    /**
+     * Writes a slot. Takes in flight on it no longer fire, though each still reclaims its copy; a
+     * storage item written to a UI-owned slot is watched; and a storage button the write replaces
+     * gives the viewer back what they put in it.
+     *
+     * @param write.container The surface's container.
+     * @param write.index Surface slot.
+     * @param write.stack The stack to write, or `undefined` to empty the slot.
+     * @param write.isUiOwned Whether the slot is the UI's rather than an `input`.
+     * @throws When the engine refuses the write.
+     */
+    writeSlot({ container, index, stack, isUiOwned }: { container: Container; index: number; stack: ItemStack | undefined; isUiOwned: boolean }): void {
+        const own = this.#storageButtons.takeOwnItemsAt(container, index);
+        container.setItem(index, stack);
         this.#tracker.invalidatePending(index);
+        this.#storageButtons.record({ index, stack, isUiOwned });
+        this.#host.viewer.returnOwnItems(own);
+    }
+
+    /** Gives the viewer back what they put in a storage item on a button, as the surface closes. */
+    rescueStorageButtons(): void {
+        const container = this.#host.container();
+        if (container) this.#storageButtons.rescueAll(container, this.#storageSink());
     }
 
     /**
@@ -258,6 +281,7 @@ export class SurfaceScanner {
 
         try {
             const result = this.#tracker.runPass();
+            this.#checkStorageButtons();
             this.#pendingTakes = result.pendingCount;
             this.#meter.record({ startedAtMs, slotsScanned: result.slotsScanned });
             this.#pacer.recordPass(isUrgent || result.changedSlots > 0 || result.interactionCount > 0 || result.pendingCount > 0);
@@ -270,6 +294,22 @@ export class SurfaceScanner {
         } finally {
             this.#endPass();
         }
+    }
+
+    /** Checks the storage items on buttons, once every {@link STORAGE_BUTTON_CHECK_INTERVAL_TICKS}. */
+    #checkStorageButtons(): void {
+        const container = this.#passContainer;
+        if (!container || this.#host.isClosed() || system.currentTick < this.#nextStorageCheckTick) return;
+        this.#nextStorageCheckTick = system.currentTick + STORAGE_BUTTON_CHECK_INTERVAL_TICKS;
+        this.#storageButtons.check(container, this.#storageSink());
+    }
+
+    /** Where the storage buttons send the viewer's own items and their records. */
+    #storageSink(): StorageButtonSink {
+        return {
+            giveBack: (stacks) => this.#host.viewer.returnOwnItems(stacks),
+            trace: (message) => this.#host.trace(message),
+        };
     }
 
     /** Delivers an interaction, counting handler time apart from detection. */

@@ -201,8 +201,10 @@ The UUIDs of the shared packs never change:
 | ContainerUI BP | `2d2c35a3-017c-42cd-a910-9c64d55bcc25` |
 | ContainerUI RP | `5d3a0ae4-d90d-4d25-8a23-80bc25f83ad7` |
 
-The pack version is the library's version without its pre-release tag: `1.0.0-beta.1` ships pack
-`1.0.0`. Your add-on still carries the library's scripts itself, since scripts cannot be shared
+The pack version is counted apart from the library's and goes up whenever a release changes the packs:
+`1.0.0-beta.1` shipped pack `1.0.0`, and `1.0.0-beta.2` ships pack `1.0.1`. A game keeps a pack it has
+downloaded or imported under its UUID and version, so a newer pack replaces the old copy only when its
+version is higher. Your add-on still carries the library's scripts itself, since scripts cannot be shared
 between packs; only the entities and layouts are shared. Every pack's scripts run in a context of
 their own, so any number of add-ons can carry the library side by side.
 

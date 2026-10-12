@@ -248,4 +248,4 @@ export {
 export { createTestHost, type TestHost, type TestHostOptions, type WriteRecord } from "./host/testHost.js";
 
 /** The library version. */
-export const VERSION = "1.0.0-beta.1";
+export const VERSION = "1.0.0-beta.2";

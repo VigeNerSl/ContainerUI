@@ -202,11 +202,12 @@ The UUIDs of the shared packs never change:
 | ContainerUI RP | `5d3a0ae4-d90d-4d25-8a23-80bc25f83ad7` |
 
 The pack version is counted apart from the library's and goes up whenever a release changes the packs:
-`1.0.0-beta.1` shipped pack `1.0.0`, and `1.0.0-beta.2` ships pack `1.0.1`. A game keeps a pack it has
-downloaded or imported under its UUID and version, so a newer pack replaces the old copy only when its
-version is higher. Your add-on still carries the library's scripts itself, since scripts cannot be shared
-between packs; only the entities and layouts are shared. Every pack's scripts run in a context of
-their own, so any number of add-ons can carry the library side by side.
+`1.0.0-beta.1` shipped pack `1.0.0`, and `1.0.0-beta.2` raised it to `1.0.1`, which `1.0.0-beta.3`
+keeps. A game keeps a pack it has downloaded or imported under its UUID and version, so a newer pack
+replaces the old copy only when its version is higher. Your add-on still carries the library's scripts
+itself, since scripts cannot be shared between packs; only the entities and layouts are shared. Every
+pack's scripts run in a context of their own, so any number of add-ons can carry the library side by
+side.
 
 You may also ship the two shared packs unchanged inside your own download, with their UUIDs: a world
 loads a pack with a given UUID once, and a second copy is skipped with a warning in the log.

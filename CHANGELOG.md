@@ -2,7 +2,9 @@
 
 Every public release, newest first. Breaking changes are listed under their own heading.
 
-## Unreleased
+## 1.0.0-beta.3 - 2026-10-12
+
+The shared packs are unchanged and stay at version `1.0.1`.
 
 - **Fixed a duplication through bundles.** A menu button put in a bundle stayed there as an item:
   the sweeps never looked inside storage items, so the menu repainted the button and the copy

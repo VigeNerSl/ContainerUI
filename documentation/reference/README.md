@@ -326,4 +326,4 @@ Types: `SlotProbe`, `PendingTake`, `TakeResolution`, `TrackerIO`, `ScanPassResul
 
 | Export | |
 | --- | --- |
-| `VERSION` **core** | The library version string, such as `"1.0.0-beta.2"`. |
+| `VERSION` **core** | The library version string, such as `"1.0.0-beta.3"`. |

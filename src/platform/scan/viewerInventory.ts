@@ -7,7 +7,7 @@ import { inventoryContainerOf } from "../storage/inventoryContainer.js";
 import { onPlayerInventoryChange } from "./inventoryChanges.js";
 import { fromItemStack, toStorageStack } from "../items/itemConversion.js";
 import { isRenderedItem } from "../items/itemMarker.js";
-import { scrubInventoryOf, scrubStorageItem } from "../items/itemGuard.js";
+import { scrubInventoryOf, scrubStorageItem, spillToPlayer } from "../items/itemSweeps.js";
 import { takeOwnItemsOut } from "../items/storageItems.js";
 import { probeOfHandle, probeOfStack, slotHandlesOf } from "./slotHandles.js";
 import type { SlotProbe } from "./slotMatching.js";
@@ -297,14 +297,16 @@ export class ViewerInventory {
         let taken = this.#takeBackFromCursor(item, amount);
         const container = this.#container();
         if (!container) return taken;
-        for (let index = 0; index < container.size && taken < amount; index++) {
+        const { size } = container;
+        for (let index = 0; index < size && taken < amount; index++) {
             let stack: ItemStack | undefined;
             try {
                 stack = container.getItem(index);
             } catch {
                 continue;
             }
-            if (!stack || isRenderedItem(stack) || !isTakeBackMatch(fromItemStack(stack), item)) continue;
+            // The type first: most slots fail it, and are not read whole.
+            if (!stack || stack.typeId !== item.typeId || isRenderedItem(stack) || !isTakeBackMatch(fromItemStack(stack), item)) continue;
             const share = Math.min(stack.amount, amount - taken);
             this.reduce(index, share);
             taken += share;
@@ -316,7 +318,7 @@ export class ViewerInventory {
         try {
             const cursor = this.#cursor();
             const stack = cursor?.item;
-            if (!cursor || !stack || isRenderedItem(stack) || !isTakeBackMatch(fromItemStack(stack), item)) return 0;
+            if (!cursor || !stack || stack.typeId !== item.typeId || isRenderedItem(stack) || !isTakeBackMatch(fromItemStack(stack), item)) return 0;
             const held = stack.amount;
             const taken = Math.min(held, amount);
             // `clear()` takes the whole stack; the rest goes to the inventory.
@@ -345,7 +347,7 @@ export class ViewerInventory {
         const onRemoved = (probe: SlotProbe): void => {
             this.#swept.push(probe);
         };
-        const removed = scrubInventoryOf(player, onRemoved) + this.#scrubCursorStorage(onRemoved);
+        const removed = scrubInventoryOf(player, onRemoved) + this.#scrubCursorStorage({ player, onRemoved });
         if (removed > 0) {
             this.#scrubbedStacks += removed;
             this.#onTrace(`scrub-swept stacks=${removed} total=${this.#scrubbedStacks}`);
@@ -371,19 +373,22 @@ export class ViewerInventory {
      * Removes rendered copies from a storage item on the cursor, such as a bundle a button was put
      * in. The cursor can only be cleared, not written, so the cleaned item goes to the inventory.
      */
-    #scrubCursorStorage(onRemoved: (probe: SlotProbe) => void): number {
+    #scrubCursorStorage({ player, onRemoved }: { player: Player; onRemoved: (probe: SlotProbe) => void }): number {
         try {
             const cursor = this.#cursor();
             const stack = cursor?.item;
             // Nowhere to put the cleaned item back: clearing the cursor would destroy the player's own.
             if (!cursor || !stack || isRenderedItem(stack) || !this.#container()) return 0;
             const probes: SlotProbe[] = [];
-            const removed = scrubStorageItem(stack, (probe) => probes.push(probe));
+            const spilled: ItemStack[] = [];
+            const removed = scrubStorageItem(stack, { onRemoved: (probe) => probes.push(probe), spill: (own) => spilled.push(own) });
             const cleaned = removed > 0 ? fromItemStack(stack) : null;
             if (!cleaned) return 0;
             cursor.clear();
             const place = this.returnItem(null, cleaned);
             this.#onTrace(`cursor-storage-swept item=${stack.typeId} stacks=${removed} to=${place ?? "lost"}`);
+            // Only once the cursor is cleared: the own items that did not fit back would otherwise be a second set.
+            spilled.forEach(spillToPlayer(player));
             probes.forEach(onRemoved);
             return removed;
         } catch {

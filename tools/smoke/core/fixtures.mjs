@@ -69,3 +69,51 @@ export const settleLoads = async (clock) => {
 
 /** Whether a diagnostic is a render error mentioning `fragment`. */
 export const isRenderError = (diagnostic, fragment) => diagnostic.kind === "render-error" && diagnostic.message.includes(fragment);
+
+/** A container like the engine's: copies on read, and live slot handles that count their fetches. */
+export const makeContainer = (size) => {
+    const slots = new Array(size).fill(undefined);
+    // `typeId` and the rest throw on an empty slot, as the @minecraft/server API documents.
+    const present = (index) => {
+        const stack = slots[index];
+        if (!stack) throw new Error("InvalidContainerSlotError");
+        return stack;
+    };
+    const container = {
+        slots,
+        size,
+        isValid: true,
+        /** Slot handles fetched, to show they are kept across passes. */
+        getSlotCalls: 0,
+        getItem: (index) => slots[index]?.clone(),
+        setItem: (index, stack) => {
+            slots[index] = stack?.clone();
+        },
+        addItem: (stack) => {
+            const free = slots.findIndex((slot) => !slot);
+            if (free === -1) return stack;
+            slots[free] = stack.clone();
+            return undefined;
+        },
+        clearAll: () => slots.fill(undefined),
+        getSlot: (index) => {
+            container.getSlotCalls++;
+            return {
+                get isValid() {
+                    return container.isValid;
+                },
+                hasItem: () => slots[index] !== undefined,
+                get typeId() {
+                    return present(index).typeId;
+                },
+                get amount() {
+                    return present(index).amount;
+                },
+                get nameTag() {
+                    return present(index).nameTag;
+                },
+            };
+        },
+    };
+    return container;
+};

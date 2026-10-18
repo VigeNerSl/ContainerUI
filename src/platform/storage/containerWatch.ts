@@ -101,7 +101,8 @@ class ContainerWatch implements ContainerWatcher {
         }
 
         const changed: number[] = [];
-        for (let index = 0; index < container.size; index++) {
+        const { size } = container;
+        for (let index = 0; index < size; index++) {
             const probe = probeAt(container, index);
             if (probe === undefined || this.#matches(index, probe)) continue;
             this.#signatures.record(index, probe);

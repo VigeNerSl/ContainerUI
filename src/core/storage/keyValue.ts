@@ -90,7 +90,7 @@ const isHighSurrogate = (code: number): boolean => code >= 0xd800 && code <= 0xd
 
 const isLowSurrogate = (code: number): boolean => code >= 0xdc00 && code <= 0xdfff;
 
-/** Splits `value` into pieces of `size` UTF-16 units, never between the halves of a surrogate pair: a piece may hold one unit more, or two when `size` is 1. */
+/** Splits `value` into pieces of `size` UTF-16 units, never between the halves of a surrogate pair: a piece may hold one unit less, or one more when `size` is 1. */
 const splitChunks = (value: string, size: number): string[] => {
     const chunks: string[] = [];
     let start = 0;

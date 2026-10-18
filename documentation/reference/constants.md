@@ -42,6 +42,7 @@ All in ticks (20 per second) unless noted.
 | `IDLE_SCAN_INTERVAL_TICKS` | `2` | Default ticks between scans once the player has been idle (20 quiet passes). |
 | `WATCHDOG_INTERVAL_TICKS` | `10` | Ticks between liveness checks, sweeps and `takeBack` retries. |
 | `MAX_VIEW_DISTANCE` | `8` | Blocks the player may move from the menu entity before it closes. |
+| `CLICK_OPEN_WAIT_TICKS` | `100` | Ticks a menu opened with `openBy: "click"` waits for the player's click before it closes. |
 | `MOUNT_MAX_WAIT_TICKS` | `60` | Default ticks to wait for a menu's inventory to reach its size. |
 | `MOUNT_MAX_SPAWN_ATTEMPTS` | `5` | Spawn attempts while the engine refuses spawning (`beforeEvents`). |
 | `STORAGE_WATCH_INTERVAL_TICKS` | `10` | Default ticks between outside-change checks of an open block container. |

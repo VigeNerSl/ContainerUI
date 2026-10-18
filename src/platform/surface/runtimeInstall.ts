@@ -4,6 +4,9 @@ import { system } from "@minecraft/server";
 import { Scheduler, configureRuntime, configureTimeSource, resetRuntime, resetTimeSource, type Diagnostic } from "../../core/index.js";
 import { log } from "../../core/logging/logger.js";
 import { onUninstall, runReinstallers } from "../lifecycle.js";
+import { installItemGuard } from "../items/itemGuard.js";
+import { installSurfaceHooks } from "./surfaceRegistry.js";
+import { installHeldHooks } from "../items/heldHooks.js";
 
 let installedScheduler: Scheduler | null = null;
 
@@ -24,14 +27,19 @@ export const logDiagnostic = (diagnostic: Diagnostic): void => {
 };
 
 /**
- * Installs the tick scheduler and timers. Idempotent; `openContainer` calls it. Options apply to the
- * first call only, so call it at startup to set them.
+ * Installs the tick scheduler, the timers, the anti-duplication guard and the menu hooks. Idempotent;
+ * `openContainer` calls it. Call it at startup: the guard then sweeps every player who joins after a
+ * restart, and menu entities left by a restart or a reload are removed, before any menu opens.
+ * Options apply to the first call only.
  *
  * @param options `budgetMs`: milliseconds of work per flush. Defaults to 8.
  * @returns The scheduler.
  */
 export const installBedrockRuntime = (options: { budgetMs?: number | undefined } = {}): Scheduler => {
     if (installedScheduler) return installedScheduler;
+    installItemGuard();
+    installSurfaceHooks();
+    installHeldHooks();
     onUninstall(() => {
         installedScheduler = null;
         resetRuntime();

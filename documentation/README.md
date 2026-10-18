@@ -27,7 +27,8 @@ the library is built; you do not need it to use it.
 | Read scores and dynamic properties | [Outside state](guides/outside-state.md) |
 | Put real or decorated items on the screen, or an item Bedrock tells apart by a data value (potions, block variants, loot-only items) | [Items](guides/items.md) |
 | Draw a seamless border or backdrop | [Flat glass](guides/flat-glass.md) |
-| Read a shulker box's contents | [Shulker reader](guides/shulker-reader.md) |
+| Read or write a shulker box's contents | [Shulker reader](guides/shulker-reader.md) |
+| Open a shulker box, an ender chest or a backpack the player carries | [Storages opened by click](guides/held-storage.md) |
 | See what went wrong | [Errors, diagnostics and logging](guides/errors-and-diagnostics.md) |
 | Test menus without starting the game | [Testing](guides/testing.md) |
 | Tune the Bedrock runtime or open menus at a low level | [The Bedrock runtime](guides/bedrock-runtime.md) |
@@ -80,7 +81,9 @@ the library is built; you do not need it to use it.
   items only a loot table can build, real items, display copies and the anti-duplication guard.
 - [Flat glass](guides/flat-glass.md) — the seventeen flat glass tiles in the shared packs, for
   seamless borders and backdrops.
-- [Shulker reader](guides/shulker-reader.md) — reading a shulker box item's contents.
+- [Shulker reader](guides/shulker-reader.md) — reading and writing a shulker box item's contents.
+- [Storages opened by click](guides/held-storage.md) — a shulker box, an ender chest or your own
+  storage shown as the game's chest, written through as the player changes it.
 - [Errors, diagnostics and logging](guides/errors-and-diagnostics.md) — `ErrorBoundary`,
   diagnostics, `setLogger` and every log channel.
 - [Testing](guides/testing.md) — the test host, the manual scheduler and time source.

@@ -325,7 +325,9 @@ the same reactive loop as everything else.
 
 The mechanism: spawn an invisible rideable entity, switch its inventory to the requested size
 via a `containerui:open_<size>` event, mount the player, and let the client render that
-inventory as a chest screen. The title's first characters select the JSON UI grid variant:
+inventory as a chest screen when the player presses the inventory key. Seating alone never opens
+it (FIELD-NOTES §2). With `openBy: "click"` the entity spawns in the player's head instead and nobody
+is seated: the player's own click on it opens the screen, which needs no key. The title's first characters select the JSON UI grid variant:
 `RP/ui/chest_screen.json` matches the title prefix, and the generated `ui/container.json`
 defines the grid of each size.
 

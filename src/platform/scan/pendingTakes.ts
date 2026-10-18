@@ -1,6 +1,6 @@
 /** The takes waiting to be located, and the matchers that pick one. */
 
-import type { ItemView } from "../../core/host/host.js";
+import { areLoresEqual, type ItemView } from "../../core/host/host.js";
 import { isSameItemKind, isSameVisibleItem, probeOfView, type SlotProbe } from "./slotMatching.js";
 import { GATHER_MEMORY_TICKS, MAX_CURSOR_HOLD_TICKS } from "../constants.js";
 import type { Insertion, PendingTake, TrackerIO } from "./trackerTypes.js";
@@ -26,18 +26,11 @@ export const isReturnOf =
     (take) =>
         take.surfaceSlot === insertion.surfaceSlot && isSameVisibleItem(insertion.item, take.item);
 
-/** Whether two lores hold the same lines; no lore and an empty one are the same. */
-const isSameLore = (first: readonly string[] | undefined, second: readonly string[] | undefined): boolean => {
-    const left = first ?? [];
-    const right = second ?? [];
-    return left.length === right.length && left.every((line, index) => line === right[index]);
-};
-
 /** Matches a take of the same kind whose item carries the probe's lore. A probe without lore matches by kind. */
 export const isLotOf =
     (probe: SlotProbe): TakeMatcher =>
     (take) =>
-        isKindOf(probe)(take) && (probe.lore === undefined || isSameLore(probe.lore, take.item?.lore));
+        isKindOf(probe)(take) && (probe.lore === undefined || areLoresEqual(probe.lore, take.item?.lore));
 
 /** Matches a take whose item looks like `view`, lore included. */
 export const isViewOf =

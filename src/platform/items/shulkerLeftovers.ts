@@ -1,7 +1,8 @@
 /** The record of shulker reads cut short, and the sweep that removes the blocks they left. */
 
-import { BlockPermutation, world, type BlockInventoryComponent, type Dimension, type Vector3 } from "@minecraft/server";
+import { BlockPermutation, world, type Dimension, type Vector3 } from "@minecraft/server";
 import { NAMESPACE } from "../constants.js";
+import { blockContainerOf } from "../storage/inventoryContainer.js";
 
 /**
  * The blocks of a read cut short, per column, so a later run can remove them: the dispenser, the
@@ -59,15 +60,17 @@ export const setPendingRead = (column: string, read: PendingRead | null): void =
 };
 
 /**
- * Removes a leftover dispenser, redstone block or shulker box at a recorded position; any other block
- * stays. A dispenser or shulker box is emptied first, so the copy it holds goes with it.
+ * Removes a leftover dispenser, redstone block or shulker box at a position; any other block stays. A
+ * dispenser or shulker box is emptied first, so the copy it holds goes with it.
+ *
+ * @internal Also how a read puts its blocks back.
  */
-const removeLeftover = ({ dimension, position, air }: { dimension: Dimension; position: Vector3; air: BlockPermutation }): { isReached: boolean; isRemoved: boolean } => {
+export const removeLeftover = ({ dimension, position, air }: { dimension: Dimension; position: Vector3; air: BlockPermutation }): { isReached: boolean; isRemoved: boolean } => {
     try {
         const block = dimension.getBlock(position);
         if (!block) return { isReached: false, isRemoved: false };
         if (block.typeId === "minecraft:dispenser" || isShulkerBox(block.typeId)) {
-            (block.getComponent("inventory") as BlockInventoryComponent | undefined)?.container?.clearAll();
+            blockContainerOf(block)?.clearAll();
         } else if (block.typeId !== "minecraft:redstone_block") {
             return { isReached: true, isRemoved: false };
         }

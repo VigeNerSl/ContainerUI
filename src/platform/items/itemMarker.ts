@@ -75,6 +75,21 @@ export const stripLoreMarker = (lore: readonly string[]): string[] => {
 };
 
 /**
+ * Whether a stack carries the marker as a dynamic property. A stackable item cannot, so its marker is
+ * in its lore; {@link isRenderedItem} checks both.
+ *
+ * @param stack Any stack.
+ * @returns `false` for an unreadable stack.
+ */
+export const hasDynamicMarker = (stack: ItemStack): boolean => {
+    try {
+        return stack.getDynamicProperty(UI_ITEM_MARKER_PROPERTY) === true;
+    } catch {
+        return false;
+    }
+};
+
+/**
  * Whether a stack was made by the renderer: it carries the marker property or the legacy lore
  * marker.
  *
@@ -83,11 +98,7 @@ export const stripLoreMarker = (lore: readonly string[]): string[] => {
  */
 export const isRenderedItem = (stack: ItemStack | undefined): boolean => {
     if (!stack) return false;
-    try {
-        if (stack.getDynamicProperty(UI_ITEM_MARKER_PROPERTY) === true) return true;
-    } catch {
-        // Fall through to the lore check.
-    }
+    if (hasDynamicMarker(stack)) return true;
     try {
         return hasLegacyMarker(stack.getLore());
     } catch {

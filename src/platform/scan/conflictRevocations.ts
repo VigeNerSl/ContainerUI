@@ -29,11 +29,6 @@ export class Revocations {
         this.#host = host;
     }
 
-    /** Take-backs still looking for their item. */
-    get pendingCount(): number {
-        return this.#queue.length;
-    }
-
     /** Takes `item` back now, and keeps looking for what was not found. */
     request(item: ItemView): void {
         const revocation: Revocation = { item, remaining: Math.max(1, item.amount ?? 1), attempts: 0 };

@@ -1,22 +1,24 @@
 # Shulker reader
 
-The stable Script API cannot read the items inside a shulker box **item**: the contents are part of
-the item's data, and there is no component for them. `readShulkerContents` reads them anyway, by
-placing a copy of the shulker box as a block, reading the block's inventory, and removing everything
-again.
+The stable Script API cannot read or change the items inside a shulker box **item**: the contents are
+part of the item's data, and there is no component for them. `readShulkerContents` reads them anyway,
+by placing a copy of the shulker box as a block, reading the block's inventory, and removing
+everything again; `writeShulkerContents` makes a shulker box item holding the contents you give it.
 
 ```tsx
+import type { Player } from "@minecraft/server";
 import { inventoryContainerOf, openContainer, readShulkerContents, toDisplayView } from "containerui";
 
-const held = inventoryContainerOf(player)?.getItem(player.selectedSlotIndex);
-if (held?.typeId.includes("shulker_box")) {
+const showHeldShulker = async (player: Player) => {
+    const held = inventoryContainerOf(player)?.getItem(player.selectedSlotIndex);
+    if (!held?.typeId.includes("shulker_box")) return;
     const contents = await readShulkerContents(player, held);
     const occupied = contents.filter(Boolean).length;
     openContainer(player, () => contents.map((item, index) => <slot key={index} index={index} item={toDisplayView(item)} />), {
         size: 27,
         title: `§dShulker — ${occupied} stacks`,
     });
-}
+};
 ```
 
 ## `readShulkerContents(player, shulkerStack, options?)`
@@ -25,10 +27,32 @@ Returns a promise of 27 entries, one per shulker slot: an `ItemView`, or `null` 
 
 - **It never throws.** Every failure is reported through `onEvent` and leaves the slots it could not
   read empty.
-- The views are **real items** (they carry `native`). Show them with `toDisplayView`, or the player
-  could take copies out of the menu.
+- The views are **real items** (they carry `native`, except a menu copy someone put in, which reads
+  as a plain view). Show them with `toDisplayView`, or the player could take copies out of the menu.
 - The shulker item you pass is not changed or consumed. Only a copy is placed.
 - It takes a few ticks: about 0.4 s with the defaults.
+
+## Writing a shulker box
+
+`writeShulkerContents({ player, shulkerStack, contents, onEvent? })` makes a new shulker box item
+holding `contents`: up to 27 `ItemView`s, `null` for an empty slot. A shulker box of the same type is
+placed high above the player, filled, turned back into an item and removed, all in one tick, so unlike
+reading it takes no waiting.
+
+```ts
+const result = writeShulkerContents({ player, shulkerStack: held, contents: [{ typeId: "minecraft:diamond", amount: 3 }] });
+if (result) inventory.setItem(player.selectedSlotIndex, result.stack);
+```
+
+- **The item you pass is not changed.** The new one keeps its name, lore, dynamic properties, lock,
+  keep-on-death and where it can be placed; what it held before is replaced.
+- **It returns `{ stack, leftovers }`** (`ShulkerWriteResult`), or `null` when the shulker box could not
+  be made (`onEvent` says why). `leftovers` lists what it could not hold, each with the index it had in
+  `contents`: another shulker box (a shulker box holds none, as in the game), past the 27th slot, or an
+  item no stack could be made from, such as one of an unknown type. Give them back to the player.
+- **It never throws.** It reports `written` (`occupied=N leftovers=M`) or the failure through `onEvent`.
+- It needs one air block in the player's column: the highest below the world's ceiling is used. A
+  read needs more room, a 3×3×3 of air.
 
 ## How it works
 
@@ -93,7 +117,8 @@ world.afterEvents.worldLoad.subscribe(() => sweepShulkerLeftovers());
 | `dispensed` | The copy was placed as a block. | `at=x,y,z` |
 | `dispense-timeout` | The copy never appeared as a block. | `attempts=N` |
 | `read` | The contents were read. | `occupied=N` |
-| `cleanup` | The blocks were removed. | `swept=N kept=M sweptItems=… keptItems=…` — the copies removed and the other loose items left alone, each as `typeId×amount@yN` |
+| `written` | `writeShulkerContents` made the item. | `occupied=N leftovers=M` |
+| `cleanup` | The blocks were removed. | `swept=N kept=M sweptItems=… keptItems=…` — the copies removed and the other loose items left alone, each as `name×amount@yN`, the type without its namespace, such as `diamond×1@y70`, or `?` for a stack that could not be read |
 | `error` | Something failed. | the error |
 
 ```ts

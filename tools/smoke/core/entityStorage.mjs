@@ -1,8 +1,8 @@
-/** EntityInventoryStorage through both of its subclasses: views, writes, a gone entity, and read failures reported once. */
+/** EntityInventoryStorage through its subclasses: views, writes, a gone entity, and read failures reported once. */
 
 import { storageEntity } from "./fixtures.mjs";
 
-export const checkEntityStorage = async ({ check, load, loadEngine }) => {
+export const checkEntityStorage = async ({ check, load, loadEngine, core, freshRuntime }) => {
     console.log("\n  entity inventory storages\n");
 
     const { ItemStack } = await loadEngine();
@@ -141,5 +141,51 @@ export const checkEntityStorage = async ({ check, load, loadEngine }) => {
         } finally {
             setBlockContainerLogger(null);
         }
+    }
+    {
+        // A player's ender chest, through `_containerOf`: the same container every ender chest shows them.
+        const { PlayerEnderStorage } = await load("platform/storage/enderStorage.js");
+        const { __subscribers } = await loadEngine();
+        const ender = storageEntity(ItemStack, 27);
+        const player = { ...storageEntity(ItemStack, 36), id: "player-ender-1", name: "Alex" };
+        player.getComponent = (id) => (id === "minecraft:ender_inventory" ? ender.getComponent("minecraft:inventory") : undefined);
+        const storage = PlayerEnderStorage.forPlayer(player);
+        check("one ender storage per player", PlayerEnderStorage.forPlayer(player) === storage);
+        const inventoryStorage = PlayerInventoryStorage.forPlayer(player);
+        check("and apart from their inventory storage", inventoryStorage !== storage);
+        storage.set(3, { typeId: "minecraft:diamond", amount: 2 });
+        check("a write reaches the ender chest, not the inventory", ender.slots[3]?.typeId === "minecraft:diamond" && player.slots[3] === undefined);
+        check("the size is the ender chest's", storage.size === 27);
+
+        // The engine's ender chest hands out slot handles that are invalid from the start (measured in a world).
+        const enderContainer = ender.getComponent("minecraft:inventory").container;
+        enderContainer.getSlot = () => ({
+            isValid: false,
+            hasItem: () => {
+                throw new Error("InvalidContainerSlotError");
+            },
+        });
+        storage.notifyExternalChange();
+        const view = storage.get(3);
+        check("without usable handles an unchanged slot still reads as the same view", view !== null && storage.get(3) === view);
+        ender.slots[3] = new ItemStack("minecraft:diamond", 5);
+        check("and a slot changed from outside is read again", storage.get(3)?.amount === 5 && storage.get(3) !== view);
+
+        // Taking from a stack and adding to one are edits, not conflicts.
+        const { h, mount, createTestHost, StorageSlots } = core;
+        const { clock } = freshRuntime();
+        const host = createTestHost({ size: 27 });
+        const conflicts = [];
+        mount(() => h(StorageSlots, { storage, index: 0, count: 27, onConflict: (event) => conflicts.push(event.index) }), host, { syncMount: true });
+        host.simulateTake(3);
+        clock.runPending();
+        host.simulatePlace(3, { typeId: "minecraft:diamond", amount: 9 });
+        clock.runPending();
+        check("taking and adding in the ender chest reach it without a conflict", conflicts.length === 0 && ender.slots[3]?.amount === 9, `conflicts=${conflicts.join(",")} amount=${ender.slots[3]?.amount}`);
+
+        for (const callback of __subscribers.get("after:playerLeave") ?? []) callback({ playerId: player.id });
+        check("a player who leaves drops both their storages", PlayerEnderStorage.forPlayer(player) !== storage && PlayerInventoryStorage.forPlayer(player) !== inventoryStorage);
+        PlayerEnderStorage.evict(player.id);
+        PlayerInventoryStorage.evict(player.id);
     }
 };

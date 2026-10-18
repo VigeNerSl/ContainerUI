@@ -117,7 +117,7 @@ export class ExpectedSlots {
     }
 }
 
-/** Probe signatures of a container whose size can change: the viewer's inventory. */
+/** Probe signatures of a container whose size can change, such as a player's inventory or a watched storage. */
 export class Signatures {
     #typeId: string[] = [];
     #amount: number[] = [];

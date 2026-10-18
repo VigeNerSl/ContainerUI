@@ -107,7 +107,8 @@ export class PlayerInventoryDiff {
      * arrive and the tracker can look for the player's stack it displaced.
      */
     #checkUnexplainedChange(): void {
-        for (let index = 0; index < this.#signatures.size; index++) {
+        const { size } = this.#signatures;
+        for (let index = 0; index < size; index++) {
             const typeId = this.#signatures.typeIdAt(index);
             if (typeId === "") continue;
             const name = this.#signatures.nameAt(index);

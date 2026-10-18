@@ -1,308 +1,129 @@
-/** Reads a shulker box item's contents by dispensing it as a block high above the player. */
+/**
+ * Reading and writing a shulker box item's contents. A read dispenses a copy as a block above the
+ * player, which takes a few ticks; a write places and removes a block within one tick.
+ */
 
-import {
-    BlockPermutation,
-    system,
-    type Block,
-    type BlockInventoryComponent,
-    type Container,
-    type Dimension,
-    type Entity,
-    type EntityItemComponent,
-    type ItemStack,
-    type Player,
-    type Vector3,
-} from "@minecraft/server";
+import type { Block, Dimension, ItemStack, Player } from "@minecraft/server";
 import type { ItemView } from "../../core/index.js";
-import {
-    ITEM_COMPONENT_ID,
-    ITEM_ENTITY_TYPE_ID,
-    SHULKER_READER_DROP_DISTANCE,
-    SHULKER_READER_MAX_ATTEMPTS,
-    SHULKER_READER_TICK_DELAY,
-    SHULKER_SIZE,
-    hiddenYFor,
-} from "../constants.js";
-import { fromItemStack } from "./itemConversion.js";
-import { isShulkerBox, setPendingRead, sweepPendingReads } from "./shulkerLeftovers.js";
+import { SHULKER_SIZE, hiddenYFor } from "../constants.js";
+import { notifySafely } from "../observer.js";
+import { blockContainerOf } from "../storage/inventoryContainer.js";
+import { fromItemStack, toStorageStack } from "./itemConversion.js";
+import { withDispensedShulker, type ShulkerReadEvent, type ShulkerReadOptions } from "./shulkerDispense.js";
+import { isShulkerBox } from "./shulkerLeftovers.js";
 
-/** One step of a read, for a logger. */
-export interface ShulkerReadEvent {
-    kind:
-        | "not-a-shulker"
-        | "column-busy"
-        | "start"
-        | "no-safe-space"
-        | "dispensed"
-        | "dispense-timeout"
-        | "read"
-        | "cleanup"
-        | "error";
-    detail?: string;
+export type { ShulkerReadEvent, ShulkerReadOptions };
+export { sweepShulkerLeftovers } from "./shulkerDispense.js";
+
+/** A shulker box item made with chosen contents, and what it could not hold. */
+export interface ShulkerWriteResult {
+    /** The new item: the shulker's own name, lore, dynamic properties and the rest of its item data, holding the contents. */
+    stack: ItemStack;
+    /** Items the shulker refused, such as another shulker box, or past its 27 slots, with the index they had in `contents`. */
+    leftovers: { index: number; item: ItemView }[];
 }
 
-/** Timing of a {@link readShulkerContents} call, and its observer. */
-export interface ShulkerReadOptions {
-    /** Ticks between steps. */
-    tickDelay?: number;
-    /** Attempts to find the dispensed block. */
-    maxAttempts?: number;
-    /** Observes every step. */
-    onEvent?: (event: ShulkerReadEvent) => void;
+/** A shulker box filled from stacks, and the indexes of the stacks it refused. */
+export interface FilledShulker {
+    stack: ItemStack;
+    refused: number[];
 }
-
-/** A read in progress: where its blocks are. */
-interface ActiveRead {
-    dimensionId: string;
-    x: number;
-    z: number;
-}
-
-/** Reads in progress by column, as `dimension:x:z`. */
-const activeReads = new Map<string, ActiveRead>();
 
 /**
- * Two reads conflict when their columns are within this many columns of each other on both axes. A
- * read's redstone block powers the blocks beside it, so a second dispenser two columns away would be
- * fired by the first read's.
+ * Copies what an item carries apart from its block: its name, lore, dynamic properties, lock, keep on
+ * death, and where it can be placed and what it can break. An item made from a block keeps only what
+ * the block held.
  */
-const READ_CLEARANCE = 2;
-
-/** Whether another read is close enough to share power or blocks with one at `x`, `z`. */
-const isNearActiveRead = ({ dimensionId, x, z }: ActiveRead): boolean => {
-    return Array.from(activeReads.values()).some(
-        (read) => read.dimensionId === dimensionId && Math.abs(read.x - x) <= READ_CLEARANCE && Math.abs(read.z - z) <= READ_CLEARANCE,
-    );
+const copyItemData = ({ from, to }: { from: ItemStack; to: ItemStack }): void => {
+    if (from.nameTag !== undefined) to.nameTag = from.nameTag;
+    to.setLore(from.getLore());
+    for (const id of from.getDynamicPropertyIds()) to.setDynamicProperty(id, from.getDynamicProperty(id));
+    to.keepOnDeath = from.keepOnDeath;
+    to.lockMode = from.lockMode;
+    to.setCanPlaceOn(from.getCanPlaceOn());
+    to.setCanDestroy(from.getCanDestroy());
 };
 
-/** The six blocks sharing a face with `center`. */
-const neighboursOf = ({ x, y, z }: Vector3): Vector3[] => {
-    return [
-        { x, y: y + 1, z },
-        { x, y: y - 1, z },
-        { x: x + 1, y, z },
-        { x: x - 1, y, z },
-        { x, y, z: z + 1 },
-        { x, y, z: z - 1 },
-    ];
-};
-
-/** Whether the 3×3×3 cube centred on `center` is loaded air. */
-const isAllAir = (dimension: Dimension, center: Vector3): boolean => {
-    for (let offsetX = -1; offsetX <= 1; offsetX++) {
-        for (let offsetY = -1; offsetY <= 1; offsetY++) {
-            for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
-                let block: Block | undefined;
-                try {
-                    block = dimension.getBlock({ x: center.x + offsetX, y: center.y + offsetY, z: center.z + offsetZ });
-                } catch {
-                    return false;
-                }
-                if (!block || !block.isAir) return false;
-            }
-        }
-    }
-    return true;
-};
-
-/** The centre Y of a 3×3×3 air pocket below the height cap in the column at `x`, `z`, or `null`. */
-const findSafeAirSpace = (dimension: Dimension, { x, z }: { x: number; z: number }): number | null => {
+/** The first air block below the height cap in the column at `x`, `z`, or `undefined`. */
+const airBlockAbove = (dimension: Dimension, { x, z }: { x: number; z: number }): Block | undefined => {
     const floor = dimension.heightRange?.min ?? 0;
-
-    for (let testY = hiddenYFor(dimension); testY > floor + 2; testY--) {
-        if (isAllAir(dimension, { x, y: testY, z })) return testY;
+    for (let height = hiddenYFor(dimension); height > floor; height--) {
+        const block = dimension.getBlock({ x, y: height, z });
+        if (block?.isAir) return block;
     }
-    return null;
-};
-
-/** The first shulker box block at one of `positions`, or `null`. */
-const findShulkerAt = (dimension: Dimension, positions: readonly Vector3[]): Block | null => {
-    for (const position of positions) {
-        let block: Block | undefined;
-        try {
-            block = dimension.getBlock(position);
-        } catch {
-            continue;
-        }
-        if (block && isShulkerBox(block.typeId)) return block;
-    }
-    return null;
+    return undefined;
 };
 
 /**
- * Turns every dispenser, redstone block and shulker box at `positions` back into air.
+ * Places a shulker box of `shulkerStack`'s type above the player, fills it from `stacks` as they are,
+ * turns it back into an item and removes it, all within the call. Never throws: failures report
+ * through `onEvent`.
  *
- * @returns Whether every position could be reached; `false` when a chunk was not loaded.
+ * @internal Used by `writeShulkerContents` and by the shulker box opened by click.
+ * @returns The new item and the indexes of the stacks it refused, or `undefined` when it could not be made.
  */
-const cleanup = (dimension: Dimension, positions: readonly Vector3[]): boolean => {
-    const air = BlockPermutation.resolve("minecraft:air");
-    return positions
-        .map((position) => {
-            try {
-                const block = dimension.getBlock(position);
-                if (!block) return false;
-                if (block.isAir) return true;
-                const shouldClear = block.typeId === "minecraft:dispenser" || block.typeId === "minecraft:redstone_block" || isShulkerBox(block.typeId);
-                if (shouldClear) block.setPermutation(air);
-                return true;
-            } catch {
-                // An unloaded chunk: nothing of ours can be reached there yet.
-                return false;
-            }
-        })
-        .every((isReached) => isReached);
-};
-
-/**
- * Removes what a read cut short left behind: only a dispenser, a redstone block or a shulker box
- * still standing exactly where the read recorded one, emptied first. A position in a chunk that is
- * not loaded keeps its record for a later run.
- *
- * Runs at the start of every read; call it once at world start as well when reads are rare.
- *
- * @returns How many blocks it removed.
- * @example
- * world.afterEvents.worldLoad.subscribe(() => sweepShulkerLeftovers());
- */
-export const sweepShulkerLeftovers = (): number => {
-    // A read still running owns its blocks.
-    return sweepPendingReads((column) => activeReads.has(column));
-};
-
-/** The ids of loose items around `center`, or an empty set when the query fails. */
-const looseItemIdsNear = (dimension: Dimension, center: Vector3): Set<string> => {
-    try {
-        const drops = dimension.getEntities({ type: ITEM_ENTITY_TYPE_ID, location: center, maxDistance: SHULKER_READER_DROP_DISTANCE });
-        return new Set(drops.map((drop) => drop.id));
-    } catch {
-        return new Set();
-    }
-};
-
-/** The stack a loose item entity carries, or `undefined` when it cannot be read. */
-const stackOfDrop = (drop: Entity): ItemStack | undefined => {
-    try {
-        return (drop.getComponent(ITEM_COMPONENT_ID) as EntityItemComponent | undefined)?.itemStack;
-    } catch {
+export const fillShulker = ({
+    player,
+    shulkerStack,
+    stacks,
+    onEvent,
+}: {
+    player: Player;
+    shulkerStack: ItemStack;
+    stacks: readonly (ItemStack | undefined)[];
+    onEvent: ((event: ShulkerReadEvent) => void) | undefined;
+}): FilledShulker | undefined => {
+    if (!isShulkerBox(shulkerStack.typeId)) {
+        notifySafely(onEvent, { kind: "not-a-shulker", detail: shulkerStack.typeId });
         return undefined;
     }
-};
-
-/** A loose item as `typeId×amount@yN`, without the `minecraft:` namespace. */
-const describeDrop = (drop: Entity, stack: ItemStack | undefined): string => {
-    if (!stack) return "?";
+    let block: Block | undefined;
     try {
-        return `${stack.typeId.replace("minecraft:", "")}×${stack.amount}@y${Math.floor(drop.location.y)}`;
-    } catch {
-        return "?";
-    }
-};
-
-/**
- * Removes the read's own leaked drop: a copy of the shulker the dispenser threw out instead of
- * placing. Only a new loose item of the shulker's type qualifies; the contents and the dispenser
- * are emptied before any block is cleared, so nothing else of the read can drop. Everything else,
- * such as items a player drops through the space during the read, is left alone.
- *
- * @returns The drops it removed, and the loose items it left alone.
- * @internal Used by the anti-duplication smoke suite.
- */
-export const sweepDrops = ({
-    dimension,
-    center,
-    before,
-    shulkerTypeId,
-}: {
-    dimension: Dimension;
-    center: Vector3;
-    before: ReadonlySet<string>;
-    shulkerTypeId: string;
-}): { swept: string[]; kept: string[] } => {
-    const result: { swept: string[]; kept: string[] } = { swept: [], kept: [] };
-    try {
-        const drops = dimension.getEntities({ type: ITEM_ENTITY_TYPE_ID, location: center, maxDistance: SHULKER_READER_DROP_DISTANCE });
-        for (const drop of drops) {
-            const stack = stackOfDrop(drop);
-            const description = describeDrop(drop, stack);
-            const isLeakedCopy = !before.has(drop.id) && stack?.typeId === shulkerTypeId;
-            if (!isLeakedCopy) {
-                result.kept.push(description);
-                continue;
-            }
-            try {
-                if (!drop.isValid) continue;
-                drop.remove();
-                result.swept.push(description);
-            } catch {
-                // Already gone.
-            }
+        block = airBlockAbove(player.dimension, { x: Math.floor(player.location.x), z: Math.floor(player.location.z) });
+        if (!block) {
+            notifySafely(onEvent, { kind: "no-safe-space" });
+            return undefined;
         }
-    } catch {
-        // The query failed.
+        block.setType(shulkerStack.typeId);
+        const container = blockContainerOf(block);
+        if (!container) {
+            notifySafely(onEvent, { kind: "error", detail: "placed shulker has no writable container" });
+            return undefined;
+        }
+        const refused: number[] = [];
+        stacks.forEach((stack, index) => {
+            if (!stack) return;
+            try {
+                // The game lets a script put one shulker box in another; a player cannot, and neither does this.
+                if (isShulkerBox(stack.typeId)) throw new Error("a shulker box holds no shulker box");
+                if (index >= container.size) throw new Error("no slot");
+                container.setItem(index, stack);
+            } catch {
+                refused.push(index);
+            }
+        });
+        const filled = block.getItemStack(1, true);
+        if (!filled) {
+            notifySafely(onEvent, { kind: "error", detail: "the filled shulker gave no item" });
+            return undefined;
+        }
+        copyItemData({ from: shulkerStack, to: filled });
+        notifySafely(onEvent, { kind: "written", detail: `occupied=${stacks.filter(Boolean).length - refused.length} leftovers=${refused.length}` });
+        return { stack: filled, refused };
+    } catch (error) {
+        notifySafely(onEvent, { kind: "error", detail: String(error) });
+        return undefined;
+    } finally {
+        // Emptied first, so taking the block away drops nothing.
+        try {
+            if (block && isShulkerBox(block.typeId)) {
+                blockContainerOf(block)?.clearAll();
+                block.setType("minecraft:air");
+            }
+        } catch {
+            // The chunk unloaded: the block went with it.
+        }
     }
-    return result;
-};
-
-/** Turns a block into an upward-facing dispenser, waits a step, and loads one copy of the shulker. */
-const loadDispenser = async ({
-    block,
-    shulkerStack,
-    tickDelay,
-}: {
-    block: Block;
-    shulkerStack: ItemStack;
-    tickDelay: number;
-}): Promise<Container | undefined> => {
-    let permutation: BlockPermutation;
-    try {
-        permutation = BlockPermutation.resolve("minecraft:dispenser", { facing_direction: 1 });
-    } catch {
-        permutation = BlockPermutation.resolve("minecraft:dispenser");
-    }
-    block.setPermutation(permutation);
-    await system.waitTicks(tickDelay);
-
-    const container = (block.getComponent("inventory") as BlockInventoryComponent | undefined)?.container;
-    if (!container) return undefined;
-    const loaded = shulkerStack.clone();
-    loaded.amount = 1;
-    container.setItem(0, loaded);
-    return container;
-};
-
-/** Waits step by step for the dispensed shulker block to appear at one of `positions`. */
-const waitForShulker = async ({
-    dimension,
-    positions,
-    tickDelay,
-    maxAttempts,
-}: {
-    dimension: Dimension;
-    positions: readonly Vector3[];
-    tickDelay: number;
-    maxAttempts: number;
-}): Promise<Block | null> => {
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        await system.waitTicks(tickDelay);
-        const placed = findShulkerAt(dimension, positions);
-        if (placed) return placed;
-    }
-    return null;
-};
-
-/**
- * Copies a placed shulker's slots into `contents`, then empties it so breaking it drops nothing.
- *
- * @returns Whether the shulker's container could be read.
- */
-const readPlacedShulker = (block: Block, contents: (ItemView | null)[]): boolean => {
-    const container = (block.getComponent("inventory") as BlockInventoryComponent | undefined)?.container;
-    if (!container || container.isValid === false) return false;
-    for (let slotIndex = 0; slotIndex < Math.min(container.size, SHULKER_SIZE); slotIndex++) {
-        contents[slotIndex] = fromItemStack(container.getItem(slotIndex));
-    }
-    container.clearAll();
-    return true;
 };
 
 /**
@@ -319,117 +140,80 @@ const readPlacedShulker = (block: Block, contents: (ItemView | null)[]): boolean
  * const occupied = contents.filter(Boolean).length;
  */
 export const readShulkerContents = async (player: Player, shulkerStack: ItemStack, options: ShulkerReadOptions = {}): Promise<(ItemView | null)[]> => {
-    const emit = (event: ShulkerReadEvent): void => {
+    const contents = await readShulkerStacks({ player, shulkerStack, options });
+    return Array.from({ length: SHULKER_SIZE }, (_unused, index) => fromItemStack(contents?.[index]));
+};
+
+/**
+ * Reads a shulker box item's slots as stacks through one dispense; the item is not changed.
+ *
+ * @internal Used by the reader and by the shulker box opened by click.
+ * @returns The stacks by slot, or `undefined` when the read failed.
+ */
+export const readShulkerStacks = async ({
+    player,
+    shulkerStack,
+    options = {},
+}: {
+    player: Player;
+    shulkerStack: ItemStack;
+    options?: ShulkerReadOptions;
+}): Promise<(ItemStack | undefined)[] | undefined> => {
+    return withDispensedShulker({
+        player,
+        shulkerStack,
+        options,
+        use: (block, emit) => {
+            const container = blockContainerOf(block);
+            if (!container) {
+                emit({ kind: "error", detail: "placed shulker has no readable container" });
+                return undefined;
+            }
+            const contents = Array.from({ length: Math.min(SHULKER_SIZE, container.size) }, (_unused, index) => container.getItem(index));
+            emit({ kind: "read", detail: `occupied=${contents.filter(Boolean).length}` });
+            return contents;
+        },
+    });
+};
+
+/**
+ * Makes a shulker box item holding `contents`, within the call: a shulker box of the same type is
+ * placed high above the player, filled, turned back into an item and removed, all in one tick. The
+ * item keeps `shulkerStack`'s name, lore, dynamic properties, lock, keep-on-death and where it can be
+ * placed and what it can break; `shulkerStack` itself is not changed. Never throws: failures report through `onEvent`.
+ *
+ * @param target `player`, above whom the shulker is placed; `shulkerStack`, the shulker box item to
+ * fill, what it holds now replaced; `contents`, up to 27 items, `null` for an empty slot; and
+ * `onEvent`, the step observer.
+ * @returns The new item and what it could not hold, or `null` when it could not be made.
+ * @example
+ * const result = writeShulkerContents({ player, shulkerStack: emptyShulker, contents: [{ typeId: "minecraft:diamond", amount: 3 }] });
+ * if (result) inventory.addItem(result.stack);
+ */
+export const writeShulkerContents = ({
+    player,
+    shulkerStack,
+    contents,
+    onEvent,
+}: {
+    player: Player;
+    shulkerStack: ItemStack;
+    contents: readonly (ItemView | null)[];
+    onEvent?: ((event: ShulkerReadEvent) => void) | undefined;
+}): ShulkerWriteResult | null => {
+    const stacks = contents.map((item) => {
+        if (!item) return undefined;
         try {
-            options.onEvent?.(event);
+            return toStorageStack(item);
         } catch {
-            // An observer must not break the read.
+            // An unknown item type, say: it is given back as a leftover.
+            return undefined;
         }
-    };
-
-    const contents = new Array<ItemView | null>(SHULKER_SIZE).fill(null);
-
-    if (!isShulkerBox(shulkerStack.typeId)) {
-        emit({ kind: "not-a-shulker", detail: shulkerStack.typeId });
-        return contents;
-    }
-
-    let dimension: Dimension;
-    let centerX: number;
-    let centerZ: number;
-    let safeY: number | null;
-    try {
-        dimension = player.dimension;
-        centerX = Math.floor(player.location.x);
-        centerZ = Math.floor(player.location.z);
-        if (isNearActiveRead({ dimensionId: dimension.id, x: centerX, z: centerZ })) {
-            emit({ kind: "column-busy", detail: `at=${centerX},${centerZ}` });
-            return contents;
-        }
-        try {
-            sweepShulkerLeftovers();
-        } catch {
-            // Leftovers are retried by the next read.
-        }
-        safeY = findSafeAirSpace(dimension, { x: centerX, z: centerZ });
-    } catch (error) {
-        // The player left or their position cannot be read.
-        emit({ kind: "error", detail: String(error) });
-        return contents;
-    }
-    if (safeY === null) {
-        emit({ kind: "no-safe-space" });
-        return contents;
-    }
-
-    const tickDelay = options.tickDelay ?? SHULKER_READER_TICK_DELAY;
-    const maxAttempts = options.maxAttempts ?? SHULKER_READER_MAX_ATTEMPTS;
-    const column = `${dimension.id}:${centerX}:${centerZ}`;
-    const read: ActiveRead = { dimensionId: dimension.id, x: centerX, z: centerZ };
-
-    emit({ kind: "start", detail: `at=${centerX},${safeY},${centerZ}` });
-
-    const dispenserAt: Vector3 = { x: centerX, y: safeY, z: centerZ };
-    const redstoneAt: Vector3 = { x: centerX + 1, y: safeY, z: centerZ };
-    const adjacent = neighboursOf(dispenserAt);
-    const itemsBefore = looseItemIdsNear(dimension, dispenserAt);
-    let dispenserContainer: Container | undefined;
-    // Reserved before the first await, so a read starting beside this one finds it; recorded before
-    // the first block is placed, with every place the shulker can land, so a read cut short is cleaned
-    // up after a reload and leaves no copy behind.
-    activeReads.set(column, read);
-    setPendingRead(column, { dimensionId: dimension.id, positions: [dispenserAt, redstoneAt, ...adjacent] });
-
-    try {
-        const dispenserBlock = dimension.getBlock(dispenserAt);
-        const redstoneBlock = dimension.getBlock(redstoneAt);
-        if (!dispenserBlock || !redstoneBlock) {
-            emit({ kind: "error", detail: "safe location unloaded before placement" });
-            return contents;
-        }
-
-        dispenserContainer = await loadDispenser({ block: dispenserBlock, shulkerStack, tickDelay });
-        if (!dispenserContainer) {
-            emit({ kind: "error", detail: "dispenser has no inventory component" });
-            return contents;
-        }
-
-        // Power it.
-        redstoneBlock.setPermutation(BlockPermutation.resolve("minecraft:redstone_block"));
-
-        const placedShulker = await waitForShulker({ dimension, positions: adjacent, tickDelay, maxAttempts });
-        if (!placedShulker) {
-            emit({ kind: "dispense-timeout", detail: `attempts=${maxAttempts}` });
-            return contents;
-        }
-        const { x, y, z } = placedShulker.location;
-        emit({ kind: "dispensed", detail: `at=${x},${y},${z}` });
-
-        if (!readPlacedShulker(placedShulker, contents)) {
-            emit({ kind: "error", detail: "placed shulker has no readable container" });
-            return contents;
-        }
-        emit({ kind: "read", detail: `occupied=${contents.filter(Boolean).length}` });
-    } catch (error) {
-        emit({ kind: "error", detail: String(error) });
-    } finally {
-        // Empty the dispenser, then put every touched block back and remove leaked drops.
-        try {
-            dispenserContainer?.clearAll();
-        } catch {
-            // The dispenser is gone, and the copy with it.
-        }
-        try {
-            const isCleaned = cleanup(dimension, [dispenserAt, redstoneAt, ...adjacent]);
-            // A position in an unloaded chunk could not be cleared: its record stays for a later run.
-            if (isCleaned) setPendingRead(column, null);
-            const { swept, kept } = sweepDrops({ dimension, center: dispenserAt, before: itemsBefore, shulkerTypeId: shulkerStack.typeId });
-            const pendingNote = isCleaned ? "" : " pending=true";
-            emit({ kind: "cleanup", detail: `swept=${swept.length} kept=${kept.length} sweptItems=${swept.join(",")} keptItems=${kept.join(",")}${pendingNote}` });
-        } finally {
-            activeReads.delete(column);
-        }
-    }
-
-    return contents;
+    });
+    const filled = fillShulker({ player, shulkerStack, stacks, onEvent });
+    if (!filled) return null;
+    // An item no stack could be made from counts as refused too.
+    const refused = new Set([...filled.refused, ...contents.flatMap((item, index) => (item && !stacks[index] ? [index] : []))]);
+    const leftovers = contents.flatMap((item, index) => (item && refused.has(index) ? [{ index, item }] : []));
+    return { stack: filled.stack, leftovers };
 };

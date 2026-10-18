@@ -59,8 +59,9 @@ export const openCounter = (player) => {
 What happens:
 
 1. **`openContainer`** spawns the menu entity, waits until its inventory has 27 slots (usually the
-   same tick), renders `Counter`, writes the slots, and only then seats the player, so the screen
-   opens full.
+   same tick), renders `Counter`, writes the slots, and only then seats the player. The player
+   opens the screen with the inventory key (E, or the inventory button on a phone), and it is
+   already full.
 2. **`<row index={11}>`** places its children left to right from slot 11: the paper lands on 11,
    the emerald on 12. See [Elements and layout](../guides/elements-and-layout.md).
 3. **The paper is decorative.** If the player takes it, the library puts it back.

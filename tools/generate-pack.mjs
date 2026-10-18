@@ -12,9 +12,14 @@
  */
 
 import {
+    HELD_STORAGE_ENTITY_TYPE_ID,
     SIZE_TITLE_PREFIX,
     STORAGE_ENTITY_TYPE_ID,
     SUPPORTED_SIZES,
+    SURFACE_CLICK_BOX_EVENT,
+    SURFACE_CLICK_BOX_GROUP,
+    SURFACE_NO_SEAT_EVENT,
+    SURFACE_SEAT_GROUP,
     SURFACE_ENTITY_TYPE_ID,
     containerGroupFor,
     openEventFor,
@@ -84,8 +89,9 @@ const inventoryComponents = (size, { isSiphonable }) => ({
 /**
  * An entity with an inventory group and an open event per supported size. Each event removes
  * every other size first, so switching sizes replaces the inventory rather than adding one.
+ * `groups` and `events` add the entity's own.
  */
-const buildEntity = ({ identifier, isSiphonable, components }) => ({
+const buildEntity = ({ identifier, isSiphonable, components, groups = {}, events = {} }) => ({
     format_version: ENTITY_FORMAT_VERSION,
     "minecraft:entity": {
         description: {
@@ -94,25 +100,51 @@ const buildEntity = ({ identifier, isSiphonable, components }) => ({
             is_summonable: true,
             is_experimental: false,
         },
-        component_groups: Object.fromEntries(SUPPORTED_SIZES.map((size) => [containerGroupFor(size), inventoryComponents(size, { isSiphonable })])),
+        component_groups: {
+            ...Object.fromEntries(SUPPORTED_SIZES.map((size) => [containerGroupFor(size), inventoryComponents(size, { isSiphonable })])),
+            ...groups,
+        },
         components,
-        events: Object.fromEntries(
-            SUPPORTED_SIZES.map((size) => [
-                openEventFor(size),
-                {
-                    remove: { component_groups: SUPPORTED_SIZES.filter((other) => other !== size).map(containerGroupFor) },
-                    add: { component_groups: [containerGroupFor(size)] },
-                },
-            ]),
-        ),
+        events: {
+            ...events,
+            ...Object.fromEntries(
+                SUPPORTED_SIZES.map((size) => [
+                    openEventFor(size),
+                    {
+                        remove: { component_groups: SUPPORTED_SIZES.filter((other) => other !== size).map(containerGroupFor) },
+                        add: { component_groups: [containerGroupFor(size)] },
+                    },
+                ]),
+            ),
+        },
     },
 });
 
-/** The rideable surface entity whose inventory a menu shows. */
+/**
+ * The surface entity whose inventory a menu shows. It spawns rideable and point-sized. A menu opened
+ * by click takes the seat away through {@link SURFACE_NO_SEAT_EVENT}, for a click on a rideable entity
+ * seats the player instead of opening it; a click at a chosen point also gives it a block-sized box,
+ * the size a crate's storage entity takes clicks with, through {@link SURFACE_CLICK_BOX_EVENT}.
+ */
 const buildSurfaceEntity = () =>
     buildEntity({
         identifier: SURFACE_ENTITY_TYPE_ID,
         isSiphonable: false,
+        groups: {
+            [SURFACE_CLICK_BOX_GROUP]: { "minecraft:collision_box": { width: 1, height: 1 } },
+            [SURFACE_SEAT_GROUP]: {
+                "minecraft:rideable": {
+                    seat_count: 1,
+                    family_types: ["player"],
+                    seats: [{ position: [0, 0, 0] }],
+                },
+            },
+        },
+        events: {
+            "minecraft:entity_spawned": { add: { component_groups: [SURFACE_SEAT_GROUP] } },
+            [SURFACE_CLICK_BOX_EVENT]: { add: { component_groups: [SURFACE_CLICK_BOX_GROUP] } },
+            [SURFACE_NO_SEAT_EVENT]: { remove: { component_groups: [SURFACE_SEAT_GROUP] } },
+        },
         components: {
             "minecraft:type_family": { family: ["container_entity"] },
             "minecraft:nameable": { always_show: false, allow_name_tag_renaming: false },
@@ -128,11 +160,6 @@ const buildSurfaceEntity = () =>
             // `pushable_by_block` / `pushable_by_entity` allow pushing when present.
             "minecraft:knockback_resistance": { value: 1 },
             ...inventoryComponents(DEFAULT_SIZE, { isSiphonable: false }),
-            "minecraft:rideable": {
-                seat_count: 1,
-                family_types: ["player"],
-                seats: [{ position: [0, 0, 0] }],
-            },
         },
     });
 
@@ -158,6 +185,33 @@ const buildStorageEntity = () =>
             "minecraft:knockback_resistance": { value: 1 },
             "minecraft:persistent": {},
             ...inventoryComponents(DEFAULT_SIZE, { isSiphonable: true }),
+        },
+    });
+
+/**
+ * The entity showing a copy of a storage opened by click: a shulker box, an ender chest or a custom
+ * source. Point-sized, for the click starts inside it, in their head; no `minecraft:interact`, so the
+ * engine opens its inventory; persistent, so a screen kept for a player who left with it open
+ * survives a restart until they are back, while any other copy a restart leaves is thrown away; and
+ * closed to hoppers, since its items are a copy of someone's storage.
+ */
+const buildHeldStorageEntity = () =>
+    buildEntity({
+        identifier: HELD_STORAGE_ENTITY_TYPE_ID,
+        isSiphonable: false,
+        components: {
+            "minecraft:type_family": { family: ["container_entity", "held_storage"] },
+            "minecraft:nameable": { always_show: false, allow_name_tag_renaming: false },
+            "minecraft:collision_box": { width: 0.001, height: 0.001 },
+            "minecraft:physics": { has_gravity: false, has_collision: false },
+            "minecraft:health": { value: 32767, max: 32767 },
+            "minecraft:damage_sensor": {
+                triggers: [{ cause: "all", deals_damage: "no" }],
+            },
+            // No push component, as on the surface entity.
+            "minecraft:knockback_resistance": { value: 1 },
+            "minecraft:persistent": {},
+            ...inventoryComponents(DEFAULT_SIZE, { isSiphonable: false }),
         },
     });
 
@@ -396,6 +450,7 @@ write(
 );
 write("BP/entities/rideable_entity.json", buildSurfaceEntity());
 write("BP/entities/block_storage_entity.json", buildStorageEntity());
+write("BP/entities/held_storage_entity.json", buildHeldStorageEntity());
 
 write(
     "RP/manifest.json",

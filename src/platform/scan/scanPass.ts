@@ -13,8 +13,8 @@ import { PlayerInventoryDiff } from "./playerInventoryDiff.js";
 import { interactionKindOf, isRenderedView, isSameVisibleItem, probeOfView, type SlotProbe } from "./slotMatching.js";
 import type { Insertion, PendingTake, ScanPassResult, TakeResolution, TrackerIO } from "./trackerTypes.js";
 
-export { ExpectedSlots, interactionKindOf, isSameItemKind, isSameVisibleItem, type SlotProbe } from "./slotMatching.js";
-export type { PendingTake, ScanPassResult, SurfaceIO, TakeResolution, TrackerIO, ViewerIO } from "./trackerTypes.js";
+export { ExpectedSlots, isSameItemKind, type SlotProbe } from "./slotMatching.js";
+export type { PendingTake, ScanPassResult, TakeResolution, TrackerIO } from "./trackerTypes.js";
 
 /** Interaction detection for one surface. */
 export class InteractionTracker {

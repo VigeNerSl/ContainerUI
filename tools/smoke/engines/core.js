@@ -3,16 +3,27 @@
 /** Types that store items through `minecraft:inventory`, as a bundle does, with this many slots. */
 const STORAGE_SLOTS = { "minecraft:bundle": 4 };
 
+/** Whether a type stacks no higher than one, as tools, bundles and shulker boxes do. */
+const isSingle = (typeId) => typeId === "minecraft:bundle" || typeId.endsWith("_sword") || typeId.endsWith("shulker_box");
+
 export class ItemStack {
     constructor(typeId, amount = 1) {
         this.typeId = typeId;
         this.amount = amount;
         this.nameTag = undefined;
+        this.keepOnDeath = false;
+        this.lockMode = "none";
+        this._canPlaceOn = [];
+        this._canDestroy = [];
         this._lore = [];
         this._props = new Map();
         this._contents = STORAGE_SLOTS[typeId] ? Array.from({ length: STORAGE_SLOTS[typeId] }, () => null) : undefined;
     }
     getLore() { return [...this._lore]; }
+    getCanPlaceOn() { return [...this._canPlaceOn]; }
+    setCanPlaceOn(blocks) { this._canPlaceOn = blocks ? [...blocks] : []; }
+    getCanDestroy() { return [...this._canDestroy]; }
+    setCanDestroy(blocks) { this._canDestroy = blocks ? [...blocks] : []; }
     setLore(lore) { this._lore = lore ? [...lore] : []; }
     getDynamicProperty(id) { return this._props.get(id); }
     setDynamicProperty(id, value) {
@@ -20,13 +31,27 @@ export class ItemStack {
         else this._props.set(id, value);
     }
     getDynamicPropertyIds() { return [...this._props.keys()]; }
+    get isStackable() { return !isSingle(this.typeId); }
+    get maxAmount() { return isSingle(this.typeId) ? 1 : 64; }
+    /** As the engine's: the same item and data, whatever the amount; never for a non-stackable item. */
+    isStackableWith(other) {
+        if (!this.isStackable || !other.isStackable) return false;
+        const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+        return other.typeId === this.typeId && other.nameTag === this.nameTag && same(other._lore, this._lore) && same([...other._props], [...this._props]) && same(other.shulkerContents?.map((stored) => stored && [stored.typeId, stored.amount]), this.shulkerContents?.map((stored) => stored && [stored.typeId, stored.amount]));
+    }
     clone() {
         const copy = new ItemStack(this.typeId, this.amount);
         copy.nameTag = this.nameTag;
+        copy.keepOnDeath = this.keepOnDeath;
+        copy.lockMode = this.lockMode;
+        copy._canPlaceOn = [...this._canPlaceOn];
+        copy._canDestroy = [...this._canDestroy];
         copy._lore = [...this._lore];
         copy._props = new Map(this._props);
         copy.enchantment = this.enchantment;
         copy._contents = this._contents?.map((stored) => stored?.clone() ?? null);
+        // A shulker box item carries its contents as item data no component reads; a block made from it gets them.
+        copy.shulkerContents = this.shulkerContents?.map((stored) => stored?.clone() ?? null);
         return copy;
     }
     getComponent(id) {
@@ -79,7 +104,10 @@ export const __subscribers = new Map();
 const events = (kind) =>
     new Proxy({}, {
         get: (target, name) => ({
-            subscribe: (callback) => {
+            // The game refuses a second argument, even undefined, on signals without options.
+            subscribe: (...args) => {
+                if (args.length !== 1) throw new TypeError(`Incorrect number of arguments to function. Expected 1, received ${args.length}`);
+                const [callback] = args;
                 const key = kind + ":" + String(name);
                 __subscribers.set(key, [...(__subscribers.get(key) ?? []), callback]);
                 return callback;
@@ -126,6 +154,13 @@ export const world = {
         },
     }),
 };
+
+/** How an item may move, as the engine names it. */
+export const ItemLockMode = { inventory: "inventory", none: "none", slot: "slot" };
+
+/** Input buttons and their states, as the engine names them. */
+export const InputButton = { Jump: "Jump", Sneak: "Sneak" };
+export const ButtonState = { Pressed: "Pressed", Released: "Released" };
 
 export const EquipmentSlot = { Head: "Head", Chest: "Chest", Legs: "Legs", Feet: "Feet", Offhand: "Offhand", Mainhand: "Mainhand", Body: "Body" };
 

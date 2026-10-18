@@ -5,9 +5,11 @@
 
 import { runSuite } from "./harness.mjs";
 import { checkBundles } from "./itemguard/bundles.mjs";
+import { checkInstall } from "./itemguard/install.mjs";
+import { checkLoreMarker } from "./itemguard/lore.mjs";
 
 await runSuite({ label: "anti-dupe", passed: "anti-dupe smoke ok", crashed: "anti-dupe smoke failed", engine: "itemguard.js" }, async ({ check, load, loadEngine }) => {
-    const { ItemStack, world } = await loadEngine();
+    const { ItemStack, system, world } = await loadEngine();
     const { fromItemStack, isRenderedItem, toItemStack, toStorageStack } = await load("platform/items/itemConversion.js");
     const { getItemGuardStats, installItemGuard, setItemGuardLogger, onMarkedItemDestroyed } = await load("platform/items/itemGuard.js");
     const { UI_ITEM_MARKER_PROPERTY, LEGACY_UI_ITEM_MARKER, ITEM_ENTITY_TYPE_ID } = await load("platform/constants.js");
@@ -379,6 +381,13 @@ await runSuite({ label: "anti-dupe", passed: "anti-dupe smoke ok", crashed: "ant
         const emptyContainer = containerOf([null, null, null]);
         world.afterEvents.blockContainerOpened.emit({ block: { getComponent: () => ({ container: emptyContainer }) }, dimension: {}, openSource: { entity: opener } });
         check("an empty container is not read slot by slot", emptyContainer.reads === 0, `reads=${emptyContainer.reads}`);
+
+        // An ender chest has no container of its own: it shows the player their ender inventory.
+        const enderSlots = [copy(), new ItemStack("minecraft:cobblestone", 3)];
+        const enderOwner = { id: "player-ender", typeId: "minecraft:player", getComponent: (id) => (id === "minecraft:ender_inventory" ? { container: containerOf(enderSlots) } : undefined) };
+        const enderChest = { typeId: "minecraft:ender_chest", getComponent: () => undefined };
+        world.afterEvents.blockContainerClosed.emit({ block: enderChest, dimension: {}, closeSource: { entity: enderOwner } });
+        check("a copy put in an ender chest is swept when it closes", enderSlots[0] === null && enderSlots[1]?.typeId === "minecraft:cobblestone", JSON.stringify(enderSlots));
         stopListening();
     }
 
@@ -425,9 +434,9 @@ await runSuite({ label: "anti-dupe", passed: "anti-dupe smoke ok", crashed: "ant
     check("no removal failures", stats.removalFailed === 0);
     // One report per destruction, the unreadable-items report, the join sweep, the three
     // refused uses (pearl, first block interaction, entity), the opener's chest-open sweep, and
-    // the three container sweeps (chest open, chest close, minecart); a menu and an empty
-    // container report nothing.
-    check("the guard reported each destruction, sweep and refusal", reported.length === 15, `reported=${reported.length}`);
+    // the four container sweeps (chest open, chest close, minecart, ender chest close); a menu and
+    // an empty container report nothing.
+    check("the guard reported each destruction, sweep and refusal", reported.length === 16, `reported=${reported.length}`);
 
     // A marked item lying in a chunk when it loads was never spawned: entityLoad is the only event it raises.
     {
@@ -470,7 +479,7 @@ await runSuite({ label: "anti-dupe", passed: "anti-dupe smoke ok", crashed: "ant
                       }
                     : undefined,
         };
-        const { scrubInventoryOf } = await load("platform/items/itemGuard.js");
+        const { scrubInventoryOf } = await load("platform/items/itemSweeps.js");
         const removed = scrubInventoryOf(player);
         check("the copies cleaned around an unreadable slot are counted", removed === 2, `removed=${removed}`);
         check("a copy after the unreadable slot is still swept", equipment.Offhand === undefined, JSON.stringify(equipment.Offhand));
@@ -478,94 +487,7 @@ await runSuite({ label: "anti-dupe", passed: "anti-dupe smoke ok", crashed: "ant
 
     await checkBundles({ check, load, ItemStack, toItemStack, world, onMarkedItemDestroyed, itemEntity });
 
-    // The engine allows 20 lore lines of 50 characters: the fallback marker must fit in them.
-    {
-        const warnings = [];
-        const originalWarn = console.warn;
-        console.warn = (message) => warnings.push(String(message));
-        try {
-            const roundTrip = (lore, label) => {
-                let stack;
-                try {
-                    stack = toItemStack({ typeId: "minecraft:golden_apple", amount: 8, lore });
-                } catch (error) {
-                    check(`a stackable item with ${label} is built`, false, String(error));
-                    return;
-                }
-                check(`a stackable item with ${label} is marked`, isRenderedItem(stack));
-                check(`${label}: no lore line passes 50 characters`, stack.getLore().every((line) => line.length <= 50), JSON.stringify(stack.getLore().map((line) => line.length)));
-                check(`${label}: the lore reads back as written`, JSON.stringify(fromItemStack(stack).lore ?? []) === JSON.stringify(lore), JSON.stringify(fromItemStack(stack).lore));
-            };
-            for (const length of [41, 42, 43, 49, 50]) {
-                roundTrip(["§7short", "x".repeat(length)], `a ${length}-character last line`);
-            }
-            roundTrip(["y".repeat(45), ""], "a long line before an empty one");
-            roundTrip(Array.from({ length: 18 }, () => "line").concat("z".repeat(50)), "19 lines and a full last line");
+    await checkLoreMarker({ check, ItemStack, toItemStack, toStorageStack, fromItemStack, isRenderedItem });
 
-            // Twenty lines have no room for another: the last gives up its tail, and the item is still marked.
-            const full = Array.from({ length: 19 }, () => "line").concat("w".repeat(50));
-            let crowded;
-            try {
-                crowded = toItemStack({ typeId: "minecraft:golden_apple", amount: 8, lore: full });
-            } catch (error) {
-                check("a full 20-line lore is built", false, String(error));
-            }
-            check("a full 20-line lore is marked", crowded !== undefined && isRenderedItem(crowded));
-            check("and stays at 20 lines", crowded?.getLore().length === 20, String(crowded?.getLore().length));
-            check("only its last line was cut", JSON.stringify(fromItemStack(crowded)?.lore?.slice(0, 19)) === JSON.stringify(full.slice(0, 19)));
-
-            // A real stackable item shown on a button.
-            const lot = new ItemStack("minecraft:golden_apple", 8);
-            lot.setLore(["§7Lot 12", "§7Seller: §fSomebodyWithALongNameThatIsLong1234"]);
-            check("the lot's last line is long enough to matter", lot.getLore()[1].length >= 43, String(lot.getLore()[1].length));
-            let shown;
-            try {
-                shown = toItemStack(fromItemStack(lot), { isUiOwned: true });
-            } catch (error) {
-                check("a real stackable item with a long last line is built", false, String(error));
-            }
-            check("a real stackable item with a long last line is marked", shown !== undefined && isRenderedItem(shown));
-            check("and reads back with its lore", JSON.stringify(fromItemStack(shown)?.lore) === JSON.stringify(lot.getLore()), JSON.stringify(fromItemStack(shown)?.lore));
-
-            // A consumer lore the engine would refuse is cut and reported, not thrown.
-            let overlong;
-            try {
-                overlong = toItemStack({ typeId: "minecraft:golden_apple", lore: ["q".repeat(80)] });
-            } catch (error) {
-                check("a lore line over 50 characters does not fail the write", false, String(error));
-            }
-            check("an overlong lore line is cut and still marked", overlong !== undefined && isRenderedItem(overlong));
-            check("and reported once", warnings.filter((line) => line.includes("exceeds the engine")).length === 1, warnings.join(" | "));
-
-            // The engine throws on an amount outside 1 to 255.
-            warnings.length = 0;
-            let heaped;
-            try {
-                heaped = toItemStack({ typeId: "minecraft:diamond", amount: 300 });
-                toItemStack({ typeId: "minecraft:diamond", amount: 300 });
-            } catch (error) {
-                check("an amount the engine refuses does not fail the write", false, String(error));
-            }
-            check("an amount the engine refuses still yields a marked stack", heaped !== undefined && isRenderedItem(heaped));
-            check("and is reported once", warnings.filter((line) => line.includes("refused the amount")).length === 1, warnings.join(" | "));
-
-            const heapedReal = new ItemStack("minecraft:diamond", 5);
-            let heapedClone;
-            try {
-                heapedClone = toStorageStack({ ...fromItemStack(heapedReal), amount: 999 });
-            } catch (error) {
-                check("a real item with a refused amount does not fail the write", false, String(error));
-            }
-            check("a real item with a refused amount keeps its own", heapedClone?.amount === 5, String(heapedClone?.amount));
-        } finally {
-            console.warn = originalWarn;
-        }
-    }
-
-    // Uninstalling takes the new subscription away with the others.
-    {
-        const { uninstallBedrockRuntime } = await load("platform/lifecycle.js");
-        uninstallBedrockRuntime();
-        check("uninstalling unsubscribes from entity loads", world.afterEvents.entityLoad.handlers.length === 0, String(world.afterEvents.entityLoad.handlers.length));
-    }
+    await checkInstall({ check, load, ItemStack, toItemStack, world, system });
 });

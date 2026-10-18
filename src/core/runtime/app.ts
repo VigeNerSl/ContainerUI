@@ -217,20 +217,7 @@ class SurfaceApp implements App {
             const slot = slots.get(index);
             const desired = this.#desiredItem(index, slot);
             if (isSameItem(this.#lastWritten.get(index) ?? null, desired)) continue;
-
-            try {
-                this.host.writeSlot(index, desired);
-            } catch (error) {
-                this.#report({
-                    kind: "write-failed",
-                    message: `Slot ${index} could not be written (${desired?.typeId ?? "empty"}): ${String(error)}`,
-                    detail: error,
-                });
-            }
-            // Recorded either way, so a bad item is not retried on every commit. A copy, so an item
-            // changed in place still differs from what was written.
-            this.#lastWritten.set(index, cloneItemView(desired));
-            this.#writeCount++;
+            this.#write(index, desired);
         }
     }
 
@@ -339,6 +326,8 @@ class SurfaceApp implements App {
         } catch (error) {
             this.#report({ kind: "write-failed", message: `Slot ${index} could not be written (${item?.typeId ?? "empty"}): ${String(error)}`, detail: error });
         }
+        // Recorded either way, so a bad item is not retried on every commit. A copy, so an item
+        // changed in place still differs from what was written.
         this.#lastWritten.set(index, cloneItemView(item));
         this.#writeCount++;
     }

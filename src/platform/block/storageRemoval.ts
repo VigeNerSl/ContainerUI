@@ -5,13 +5,13 @@ import { componentNameOf, emitBlockEvent } from "./blockEvents.js";
 import { blockKeyOf, parseBlockKey, rememberContainerBlockType } from "./blockKeys.js";
 import { closeSessions, hasOpenSessions } from "./blockSessions.js";
 import { inventoryContainerOf } from "../storage/inventoryContainer.js";
+import { forEachLoadedEntity } from "../world/entities.js";
 import { onUninstall, subscribeUntilUninstall } from "../lifecycle.js";
 import { BlockStorage } from "./blockStorage.js";
 import {
     BLOCK_COMPONENT_PROPERTY,
     BLOCK_KEY_PROPERTY,
     BLOCK_TYPE_PROPERTY,
-    DIMENSION_IDS,
     HIDDEN_TAG,
     ORPHAN_CHECK_DELAY_TICKS,
     STORAGE_ENTITY_TYPE_ID,
@@ -192,14 +192,7 @@ const onStorageLoaded = (vigenersl: EntityLoadAfterEvent): void => {
 
 /** Checks every storage entity loaded at startup. */
 const sweepLoadedStorage = (): void => {
-    for (const dimensionId of DIMENSION_IDS) {
-        try {
-            const dimension = world.getDimension(dimensionId);
-            for (const entity of dimension.getEntities({ type: STORAGE_ENTITY_TYPE_ID })) settleIfOrphaned(entity);
-        } catch {
-            // Checked as its entities load.
-        }
-    }
+    forEachLoadedEntity({ type: STORAGE_ENTITY_TYPE_ID }, settleIfOrphaned);
 };
 
 /** Starts checking storage entities for orphans. Idempotent; called by `registerBlockContainer`. */

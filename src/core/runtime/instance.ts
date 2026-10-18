@@ -375,8 +375,11 @@ export const shallowEqualProps = (previous: unknown, next: unknown): boolean => 
 
     const previousProps = previous as Record<string, unknown>;
     const nextProps = next as Record<string, unknown>;
-    const previousKeys = Object.keys(previousProps);
-    if (previousKeys.length !== Object.keys(nextProps).length) return false;
-
-    return previousKeys.every((key) => Object.is(previousProps[key], nextProps[key]));
+    // A loop, not every(): it runs for every child on every commit. Props are plain objects from h().
+    let previousCount = 0;
+    for (const key in previousProps) {
+        if (!Object.is(previousProps[key], nextProps[key])) return false;
+        previousCount++;
+    }
+    return previousCount === Object.keys(nextProps).length;
 };

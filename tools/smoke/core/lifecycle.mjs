@@ -11,7 +11,7 @@ export const checkLifecycle = async ({ check, core, load, loadEngine }) => {
     const { installBlockSneak } = await load("platform/block/blockSneak.js");
     const { installStorageAccess } = await load("platform/block/storageAccess.js");
     const { installOrphanSweep } = await load("platform/block/storageRemoval.js");
-    const { installContainerClosedHook } = await load("platform/surface/surfaceRegistry.js");
+    const { installSurfaceHooks } = await load("platform/surface/surfaceRegistry.js");
     const { installBedrockRuntime } = await load("platform/surface/openContainer.js");
 
     const installAll = () => {
@@ -20,7 +20,7 @@ export const checkLifecycle = async ({ check, core, load, loadEngine }) => {
         installBlockSneak();
         installStorageAccess();
         installOrphanSweep();
-        installContainerClosedHook();
+        installSurfaceHooks();
     };
 
     installAll();

@@ -163,7 +163,12 @@ const signal = () => {
     const handlers = [];
     return {
         handlers,
-        subscribe(callback) { handlers.push(callback); return callback; },
+        // The game refuses a second argument, even undefined, on signals without options.
+        subscribe(...args) {
+            if (args.length !== 1) throw new TypeError(`Incorrect number of arguments to function. Expected 1, received ${args.length}`);
+            handlers.push(args[0]);
+            return args[0];
+        },
         unsubscribe(callback) {
             const position = handlers.indexOf(callback);
             if (position !== -1) handlers.splice(position, 1);
@@ -185,6 +190,7 @@ export const world = {
         blockContainerOpened: signal(),
         blockContainerClosed: signal(),
         entityContainerOpened: signal(),
+        playerButtonInput: signal(),
     },
     beforeEvents: {
         itemUse: signal(),
@@ -192,6 +198,9 @@ export const world = {
         playerInteractWithEntity: signal(),
     },
     getEntity: () => undefined,
+    /** The players in the world; a test sets `onlinePlayers`. */
+    onlinePlayers: [],
+    getAllPlayers() { return [...this.onlinePlayers]; },
 };
 
 export const system = {
@@ -201,6 +210,12 @@ export const system = {
     runInterval: () => 0,
     clearRun: () => undefined,
 };
+
+/** Input buttons and their states, as the engine names them. */
+/** How an item may move, as the engine names it. */
+export const ItemLockMode = { inventory: "inventory", none: "none", slot: "slot" };
+export const InputButton = { Jump: "Jump", Sneak: "Sneak" };
+export const ButtonState = { Pressed: "Pressed", Released: "Released" };
 
 export const EquipmentSlot = {
     Body: "Body",

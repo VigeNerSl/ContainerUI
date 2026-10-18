@@ -26,13 +26,13 @@ import {
     STORAGE_ENTITY_TYPE_ID,
     STORAGE_UUID_PROPERTY,
     BLOCK_KEY_PROPERTY,
-    DIMENSION_IDS,
     hiddenYFor,
 } from "../constants.js";
 import { componentNameOf, emitBlockEvent } from "./blockEvents.js";
 import { blockKeyOf, isContainerBlockType, parseBlockKey, type ParsedBlockKey } from "./blockKeys.js";
 import { findBlockStorageEntity, findHiddenStorageByStoredId } from "./blockRegistry.js";
 import { hasOpenSessions } from "./blockSessions.js";
+import { entityById, forEachLoadedEntity, playerById } from "../world/entities.js";
 import { onUninstall, runIntervalUntilUninstall, subscribeUntilUninstall } from "../lifecycle.js";
 
 /** A break in progress: whose storage, at which block. */
@@ -71,7 +71,7 @@ export const registerSneakHint = (componentName: string, message: string | null)
     hintByComponent.set(componentName, message);
 };
 
-/** Starts a restored entity's cooldown, and forgets the cooldowns that have run out, so the map holds only the live ones. */
+/** Starts a restored entity's cooldown, and forgets the cooldowns that have run out as of this restore. */
 const startRestoreCooldown = (storedId: string): void => {
     const now = system.currentTick;
     for (const [knownId, restoredAt] of restoreCooldownByStoredId) {
@@ -150,7 +150,7 @@ const tick = (): void => {
     // A break ends when the player stops sneaking or looks away.
     for (const [playerId, state] of breakingByPlayerId) {
         try {
-            const player = world.getEntity(playerId) as Player | undefined;
+            const player = playerById(playerId);
             if (!player?.isValid || !player.isSneaking) {
                 restoreByState(state, "stopped-sneaking");
                 if (player?.isValid) clearBreakingFlags(player);
@@ -159,14 +159,14 @@ const tick = (): void => {
             }
 
             const blockHit = player.getBlockFromViewDirection(RAYCAST_OPTIONS);
-            const looksAtSameBlock =
+            const isLookingAtSameBlock =
                 blockHit?.block !== undefined &&
                 state.dimensionId === player.dimension.id &&
                 state.x === Math.floor(blockHit.block.location.x) &&
                 state.y === Math.floor(blockHit.block.location.y) &&
                 state.z === Math.floor(blockHit.block.location.z);
 
-            if (!looksAtSameBlock) {
+            if (!isLookingAtSameBlock) {
                 restoreByState(state, "looked-away");
                 clearBreakingFlags(player);
             }
@@ -210,7 +210,7 @@ const restoreByState = (state: BreakingState, reason: string): void => {
     try {
         const dimension = world.getDimension(state.dimensionId);
 
-        let entity = state.entityId ? (world.getEntity(state.entityId) ?? null) : null;
+        let entity = entityById(state.entityId) ?? null;
         if (!entity?.isValid || entity.getDynamicProperty(STORAGE_UUID_PROPERTY) !== state.storedId) {
             entity = findHiddenStorageByStoredId(dimension, state.storedId);
         }
@@ -249,15 +249,7 @@ const clearBreakingFlags = (player: Player): void => {
 
 /** Puts back anything left parked, and reloads the breaks saved on players. */
 const resumeAfterStartup = (): void => {
-    for (const dimensionId of DIMENSION_IDS) {
-        try {
-            const dimension = world.getDimension(dimensionId);
-            const hidden = dimension.getEntities({ type: STORAGE_ENTITY_TYPE_ID, tags: [HIDDEN_TAG] });
-            for (const entity of hidden) restoreToItsBlock(entity, "startup");
-        } catch {
-            // Restored as its entities load.
-        }
-    }
+    forEachLoadedEntity({ type: STORAGE_ENTITY_TYPE_ID, tags: [HIDDEN_TAG] }, (entity) => restoreToItsBlock(entity, "startup"));
 
     for (const player of world.getAllPlayers()) {
         const storedId = player.getDynamicProperty(BREAKING_OWNER_PROPERTY);

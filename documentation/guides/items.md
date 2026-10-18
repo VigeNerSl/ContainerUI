@@ -317,9 +317,13 @@ it is replaced by a clean one where it fell.
 A few paths have no script event to close them. All of them need a copy to leave the menu first,
 which the scan and the sweeps above keep to a window of a tick or two.
 
-**3. The world guard.** Installed with the first menu, it destroys marked items the moment they exist
-as loose items — thrown, dropped on death, spilled from a container — and cancels using a marked item,
-using it on a block, and using it on an entity.
+**3. The world guard.** It destroys marked items the moment they exist as loose items — thrown,
+dropped on death, spilled from a container — and cancels using a marked item, using it on a block, and
+using it on an entity. `installBedrockRuntime()` installs it, or else the first menu does. On the
+next tick it sweeps every player already in the world, and from then on every player who
+joins, so a copy that outlived a restart or a script reload is gone before any menu opens. Call
+`installBedrockRuntime()` at startup: until the guard is installed, nothing sweeps, destroys or
+refuses.
 
 Marked stacks are deliberately not *locked* in the inventory: the engine draws a lock badge on locked
 stacks, which would put a badge on every button of every menu.
@@ -328,8 +332,8 @@ stacks, which would put a badge on every button of every menu.
 
 | Function | Meaning |
 | --- | --- |
-| `installItemGuard()` | Installs the world guard. Every menu calls it; idempotent. |
-| `getItemGuardStats()` | `{ inspected, destroyed, removalFailed }`: loose items examined, marked items destroyed, and removals the engine refused, since the world loaded (or the last uninstall). |
+| `installItemGuard()` | Installs the world guard, and sweeps every player in the world on the next tick. `installBedrockRuntime()` and every menu call it; idempotent. |
+| `getItemGuardStats()` | `{ inspected, destroyed, removalFailed }`: loose items examined, marked items destroyed, and removals the engine refused, since the scripts loaded or the last uninstall. |
 | `setItemGuardLogger(reporter \| null)` | Sends guard activity lines to `reporter` instead of the logger. |
 | `onMarkedItemDestroyed(listener)` | Subscribes to destroyed marked items. `listener(probe, ownerId?)` returns `true` to claim the item. Returns an unsubscribe. |
 

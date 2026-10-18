@@ -117,11 +117,11 @@ unsupported size, or for a `render` function with `open: "native"`.
 | `sneakHintMessage` | `string \| null` | an English hint | Action-bar text shown when the block is hit without sneaking. `null` shows none. |
 | `dropOnBreak` | `boolean` | `true` | Drop the stored items when the block is broken. |
 | `watchIntervalTicks` | `number \| null` | `10` | Menus: ticks between checks for changes made outside the menu. `null` disables the check. |
-| `hintMessage` | `string` | none | Menus: action-bar text shown when the menu opens. |
+| `hintMessage` | `string` | none | Menus: action-bar text shown once the player is seated, before they open the screen with the inventory key. |
 | `scanIntervalTicks` | `number` | `1` | Menus: ticks between interaction scans. |
 | `onDiagnostic` | `(diagnostic) => void` | the logger | Menus: receives the menu's diagnostics. |
 | `onTrace` | `(message) => void` | none | Menus: receives interaction-tracking lines. |
-| `onEvent` | `(event) => void` | the block logger | Receives this component's [lifecycle records](#records). |
+| `onEvent` | `(event) => void` | the block logger | Receives this component's open, close and contents [records](#records), from menus and native opens alike. The storage entity's own records (sneak hiding, restores, hits, failed writes) go to the block logger. |
 
 ### The render context
 
@@ -203,8 +203,9 @@ interface BlockContainerEvent {
 
 They go, in order of preference, to:
 
-1. the component's `onEvent`, if it has one;
-2. the handler set with `setBlockContainerLogger(handler)`;
+1. the component's `onEvent`, if it has one, for its open, close and contents records;
+2. the handler set with `setBlockContainerLogger(handler)`, which also gets every record of the
+   storage entities themselves;
 3. the [logger](errors-and-diagnostics.md#logging), as `info` (or `warn` for `error`), source `block`.
 
 The default console logger drops `info`, so records are silent until you ask for them:

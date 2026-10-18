@@ -23,6 +23,7 @@ import {
     applyDynamicMarker,
     applyLoreMarker,
     hasLegacyMarker,
+    hasDynamicMarker,
     isRenderedItem,
     MAX_LORE_LINE_LENGTH,
     MAX_LORE_LINES,
@@ -404,7 +405,8 @@ export const maxStackOf = (typeId: string): number | undefined => {
 };
 
 /**
- * Builds a marked stack for a rendered item.
+ * Builds the stack for a slot. A described item is always marked as rendered; a real item is cloned,
+ * and marked only in a UI-owned slot (see `ToItemStackOptions`).
  *
  * @param view The item, or `null` to clear the slot.
  * @param options Where the stack is going.
@@ -462,7 +464,8 @@ export const fromItemStack = (stack: ItemStack | undefined): ItemView | null => 
     const rawLore = stack.getLore();
     const isLoreMarked = hasLegacyMarker(rawLore);
     const lore = isLoreMarked ? stripLoreMarker(rawLore) : rawLore;
-    const isMarked = isLoreMarked || isRenderedItem(stack);
+    // The lore was read once above: only the dynamic marker is left to check.
+    const isMarked = isLoreMarked || hasDynamicMarker(stack);
 
     const view: ItemView = { typeId: stack.typeId, amount: stack.amount };
     if (stack.nameTag) view.name = stack.nameTag;

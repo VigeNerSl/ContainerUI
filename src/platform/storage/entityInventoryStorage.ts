@@ -29,6 +29,8 @@ export abstract class EntityInventoryStorage<TEntity extends Entity = Entity> im
     readonly #cache = new Map<number, CachedSlot>();
     /** Slot handles for checking a cached view against its slot, kept while valid. */
     #handles: ContainerSlot[] | null = null;
+    /** Whether the container's handles are invalid as soon as they are handed out, so slots are read instead. */
+    #hasDeadHandles = false;
     #entity: TEntity | null;
     /** Read failures report once per outage. */
     #hasReportedReadFailure = false;
@@ -92,7 +94,7 @@ export abstract class EntityInventoryStorage<TEntity extends Entity = Entity> im
     get(index: number): ItemView | null {
         this.#version.value;
         const cached = this.#cache.get(index);
-        if (cached && this.#isCurrent(index, cached)) return cached.view;
+        if (cached && this.#isCurrentByHandle(index, cached)) return cached.view;
 
         const container = this._container();
         if (!container) {
@@ -101,8 +103,15 @@ export abstract class EntityInventoryStorage<TEntity extends Entity = Entity> im
         }
         try {
             const stack = container.getItem(index);
+            const probe = stack ? probeOfStack(stack) : null;
+            this.#hasReportedReadFailure = false;
+            // Where no handle could tell, the read itself does: an unchanged slot keeps its view. As
+            // with a handle, unchanged means the same type, amount and name: a change made elsewhere
+            // to only the enchantments, durability, lore or data of a stack is seen with the next
+            // change the probe sees.
+            if (cached && isSameProbe(probe, cached.probe)) return cached.view;
             const view = fromItemStack(stack);
-            this.#cache.set(index, { view, probe: stack ? probeOfStack(stack) : null });
+            this.#cache.set(index, { view, probe });
             return view;
         } catch (error) {
             this.#reportReadFailure(`slot ${index}: ${String(error)}`);
@@ -160,8 +169,11 @@ export abstract class EntityInventoryStorage<TEntity extends Entity = Entity> im
         this.#cache.delete(index);
     }
 
-    /** Whether a cached view still describes its slot, compared through a kept slot handle. */
-    #isCurrent(index: number, cached: CachedSlot): boolean {
+    /**
+     * Whether a cached view still describes its slot, compared through a kept slot handle. A container
+     * that hands out no usable handles answers `false`, and the slot is read once to tell.
+     */
+    #isCurrentByHandle(index: number, cached: CachedSlot): boolean {
         try {
             const handle = this.#handleAt(index);
             return handle !== undefined && isSameProbe(probeOfHandle(handle), cached.probe);
@@ -170,11 +182,18 @@ export abstract class EntityInventoryStorage<TEntity extends Entity = Entity> im
         }
     }
 
-    /** A slot's handle. The container is resolved again only once the kept handles go invalid. */
+    /**
+     * A slot's handle, or `undefined` where there is none to use. The container is resolved again only
+     * once the kept handles go invalid. A player's ender chest hands out handles that are invalid from
+     * the start, measured in a world; such a container is read slot by slot from then on.
+     */
     #handleAt(index: number): ContainerSlot | undefined {
+        if (this.#hasDeadHandles) return undefined;
         if (!this.#handles?.[0]?.isValid) {
             const container = this._container();
             this.#handles = container ? slotHandlesOf(container, null) : null;
+            this.#hasDeadHandles = container !== null && container.size > 0 && this.#handles?.[0]?.isValid === false;
+            if (this.#hasDeadHandles) this.#handles = null;
         }
         return this.#handles?.[index];
     }
@@ -210,9 +229,18 @@ export abstract class EntityInventoryStorage<TEntity extends Entity = Entity> im
     /** The entity's container, or `null` when it cannot be read. */
     protected _container(): Container | null {
         const entity = this._entity();
-        const container = entity ? inventoryContainerOf(entity) : null;
-        if (container) this.#hasReportedReadFailure = false;
-        return container;
+        return entity ? this._containerOf(entity) : null;
+    }
+
+    /**
+     * Which of the entity's containers is the storage. Override it to store in another one, such as
+     * a player's ender inventory.
+     *
+     * @param entity The entity, valid.
+     * @returns The container, or `null` when it cannot be used.
+     */
+    protected _containerOf(entity: TEntity): Container | null {
+        return inventoryContainerOf(entity);
     }
 
     /** Stops the watch for good and forgets every view. */

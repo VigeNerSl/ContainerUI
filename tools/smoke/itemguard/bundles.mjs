@@ -22,7 +22,7 @@ export const checkBundles = async ({ check, load, ItemStack, toItemStack, world,
 
     // A button put in a bundle leaves no trace in any slot: the sweep opens storage items.
     {
-        const { scrubInventoryOf } = await load("platform/items/itemGuard.js");
+        const { scrubInventoryOf } = await load("platform/items/itemSweeps.js");
         // Reads hand out copies, as the engine's do.
         const playerWith = ({ slots, equipment = {} }) => ({
             name: "Alex",
@@ -145,7 +145,7 @@ export const checkBundles = async ({ check, load, ItemStack, toItemStack, world,
 
     // A sweep that removes a bundle copy keeps what the player put in it.
     {
-        const { scrubInventoryOf } = await load("platform/items/itemGuard.js");
+        const { scrubInventoryOf } = await load("platform/items/itemSweeps.js");
         const slots = [buttonWithOwnItem(), null];
         const container = {
             size: slots.length,
@@ -176,5 +176,56 @@ export const checkBundles = async ({ check, load, ItemStack, toItemStack, world,
         check("a loose bundle copy is destroyed", lying.removed === true);
         check("and the player's item in it is left on the ground", spawned.length === 1 && spawned[0].stack.typeId === "minecraft:wind_charge" && !isRenderedItem(spawned[0].stack), JSON.stringify(spawned.map((entry) => entry.stack.typeId)));
         check("where the copy lay", spawned[0]?.location === lying.location);
+    }
+
+    // A bundle copy swept from a full inventory: what the player put in it and does not fit drops at their feet.
+    {
+        const { scrubInventoryOf } = await load("platform/items/itemSweeps.js");
+        const button = buttonWithOwnItem();
+        button.getComponent("minecraft:inventory").container.setItem(2, new ItemStack("minecraft:arrow", 16));
+        const slots = [button];
+        const container = {
+            size: slots.length,
+            getItem: (index) => slots[index]?.clone(),
+            setItem: (index, stack) => {
+                slots[index] = stack ?? null;
+            },
+            addItem: (stack) => {
+                const free = slots.indexOf(null);
+                if (free === -1) return stack;
+                slots[free] = stack;
+                return undefined;
+            },
+        };
+        const dropped = [];
+        const player = {
+            name: "Alex",
+            location: { x: 3, y: 64, z: 3 },
+            dimension: { spawnItem: (stack, location) => dropped.push({ stack, location }) },
+            getComponent: (id) => (id === "minecraft:inventory" ? { container } : undefined),
+        };
+        scrubInventoryOf(player);
+        const kept = [...slots.filter(Boolean).map((stack) => stack.typeId), ...dropped.map(({ stack }) => stack.typeId)].sort();
+        check("own items that do not fit back are not lost", JSON.stringify(kept) === JSON.stringify(["minecraft:arrow", "minecraft:wind_charge"]), JSON.stringify(kept));
+        check("the one that did not fit drops at the player's feet", dropped.length === 1 && dropped[0].location === player.location, JSON.stringify(dropped.map(({ stack }) => stack.typeId)));
+    }
+
+    // A thrown bundle that cannot be removed: the clean copy goes back, so two never lie there.
+    {
+        const clean = [];
+        const thrown = itemEntity(bundleOf(toItemStack({ typeId: "minecraft:diamond", name: "Buy" }), new ItemStack("minecraft:diamond", 3)));
+        thrown.location = { x: 1, y: 64, z: 2 };
+        thrown.dimension = {
+            spawnItem: (stack) => {
+                const copy = { stack, isValid: true, remove: () => (copy.isValid = false) };
+                clean.push(copy);
+                return copy;
+            },
+        };
+        thrown.remove = () => {
+            throw new Error("the entity cannot be removed");
+        };
+        world.afterEvents.entityItemDrop.emit({ entity: { id: "player-B" }, items: [thrown] });
+        check("a thrown bundle that cannot be removed leaves no second one", clean.length === 1 && clean[0].isValid === false, JSON.stringify(clean.map((copy) => copy.isValid)));
     }
 };

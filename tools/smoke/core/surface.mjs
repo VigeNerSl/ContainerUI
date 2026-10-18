@@ -1,110 +1,10 @@
-/** Block storage views, and a Bedrock surface: closing, take-backs, scan passes and idle pacing. */
+/** A Bedrock surface: closing, take-backs, scan passes and idle pacing. */
 
-import { storageEntity } from "./fixtures.mjs";
-
-/** A container like the engine's: copies on read, and live slot handles that count their fetches. */
-const makeContainer = (size) => {
-    const slots = new Array(size).fill(undefined);
-    // `typeId` and the rest throw on an empty slot, as the @minecraft/server API documents.
-    const present = (index) => {
-        const stack = slots[index];
-        if (!stack) throw new Error("InvalidContainerSlotError");
-        return stack;
-    };
-    const container = {
-        slots,
-        size,
-        isValid: true,
-        /** Slot handles fetched, to show they are kept across passes. */
-        getSlotCalls: 0,
-        getItem: (index) => slots[index]?.clone(),
-        setItem: (index, stack) => {
-            slots[index] = stack?.clone();
-        },
-        addItem: (stack) => {
-            const free = slots.findIndex((slot) => !slot);
-            if (free === -1) return stack;
-            slots[free] = stack.clone();
-            return undefined;
-        },
-        clearAll: () => slots.fill(undefined),
-        getSlot: (index) => {
-            container.getSlotCalls++;
-            return {
-                get isValid() {
-                    return container.isValid;
-                },
-                hasItem: () => slots[index] !== undefined,
-                get typeId() {
-                    return present(index).typeId;
-                },
-                get amount() {
-                    return present(index).amount;
-                },
-                get nameTag() {
-                    return present(index).nameTag;
-                },
-            };
-        },
-    };
-    return container;
-};
+import { makeContainer } from "./fixtures.mjs";
+import { checkReadOnlyClose } from "./surfaceReadOnly.mjs";
 
 export const checkSurface = async ({ check, load, loadEngine, core, freshRuntime }) => {
-    const { h, mount, createTestHost, createMemoryStorage, signal, StorageSlots } = core;
-
-    console.log("\n  BlockStorage views\n");
-    {
-        freshRuntime();
-        const { ItemStack } = await loadEngine();
-        const { BlockStorage } = await load("platform/block/blockStorage.js");
-        const { fromItemStack, isRenderedItem } = await load("platform/items/itemConversion.js");
-
-        const entity = storageEntity(ItemStack, 9);
-        const enchanted = new ItemStack("minecraft:diamond_sword");
-        enchanted.enchantment = "sharpness-5";
-        entity.slots[0] = enchanted;
-        const storage = BlockStorage.forEntity(entity);
-
-        const first = storage.get(0);
-        check("an unchanged slot reads as the same view", first !== null && storage.get(0) === first);
-
-        const edit = fromItemStack(new ItemStack("minecraft:iron_sword"));
-        storage.set(1, edit);
-        check("a real item written by a mirror becomes the cached view", storage.get(1) === edit);
-
-        storage.set(2, { typeId: "minecraft:diamond" });
-        const described = storage.get(2);
-        check(
-            "a described item reads back as the real, unmarked item it became",
-            described?.native instanceof ItemStack && !isRenderedItem(described.native),
-        );
-
-        storage.notifyExternalChange();
-        const reread = storage.get(0);
-        check("an external change drops the cache", reread !== first && reread?.native?.enchantment === "sharpness-5");
-
-        // Two viewers over the platform storage, as a block container has them.
-        const { clock } = freshRuntime();
-        const viewer1 = createTestHost({ slotCount: 9 });
-        const viewer2 = createTestHost({ slotCount: 9 });
-        mount(h(StorageSlots, { storage }), viewer1);
-        mount(h(StorageSlots, { storage }), viewer2);
-
-        const plain = fromItemStack(new ItemStack("minecraft:diamond_sword"));
-        viewer2.simulateSwap(0, plain);
-        clock.runPending();
-        check(
-            "a swap by one viewer repaints the other with the stored item",
-            viewer1.readSlot(0)?.native === storage.get(0)?.native && viewer1.readSlot(0)?.native?.enchantment === undefined,
-        );
-
-        viewer1.clearHistory();
-        viewer1.simulatePlace(4, fromItemStack(new ItemStack("minecraft:gold_ingot", 3)));
-        clock.runPending();
-        check("a player's own deposit costs that viewer no repaint", viewer1.writes.length === 0, `writes=${viewer1.writes.length}`);
-        check("and reaches the entity's inventory", entity.slots[4]?.typeId === "minecraft:gold_ingot");
-    }
+    const { h, mount, createMemoryStorage, signal, StorageSlots } = core;
 
     console.log("\n  closing a surface\n");
     {
@@ -129,6 +29,8 @@ export const checkSurface = async ({ check, load, loadEngine, core, freshRuntime
             nameTag: "",
             dimension,
             triggerEvent: () => undefined,
+            getDynamicProperty: () => undefined,
+            setDynamicProperty: () => undefined,
             getComponent: (id) => {
                 if (id === "minecraft:inventory") return { container: surfaceInventory };
                 if (id === "minecraft:rideable") return { addRider: () => true };
@@ -555,86 +457,6 @@ export const checkSurface = async ({ check, load, loadEngine, core, freshRuntime
             unseated.close("invalidated");
         }
 
-        // A close from a beforeEvents handler: the engine refuses every change, so the hand-back and
-        // the removal wait for the next tick instead of failing silently.
-        console.log("\n  closing inside the read-only window\n");
-        {
-            const { __runs } = await loadEngine();
-            freshRuntime();
-            const { menu, pocket, viewer } = menuWorld({ entityId: "surface-restricted", playerId: "player-restricted" });
-            const entity = viewer.dimension.spawnEntity();
-            let isRestricted = false;
-            const restrict = (owner, name) => {
-                const original = owner[name];
-                owner[name] = function (...args) {
-                    if (isRestricted) throw new Error(`Native function [${name}] does not have required privileges.`);
-                    return original.apply(this, args);
-                };
-            };
-            restrict(menu, "setItem");
-            restrict(menu, "clearAll");
-            restrict(pocket, "setItem");
-            restrict(pocket, "addItem");
-            restrict(entity, "remove");
-
-            const traces = [];
-            const restricted = new BedrockSurface(viewer, { size: 27, onTrace: (line) => traces.push(line) });
-            restricted.open();
-            mount(() => [h("input", { index: 0 })], restricted);
-            restricted.activate();
-            menu.slots[0] = new ItemStack("minecraft:torch", 2); // the player's deposit
-
-            isRestricted = true;
-            __runs.deferRuns = true;
-            try {
-                restricted.close("programmatic");
-                check("a close inside the read-only window still closes the surface", restricted.isClosed);
-                check("it neither removes the entity nor hands anything back yet", entity.isValid && pocket.slots.every((slot) => !slot));
-                check("it leaves one clear record", traces.filter((line) => line.startsWith("close-deferred")).length === 1, traces.join(","));
-                check("and never reports an item as lost", !traces.some((line) => line.includes("to=lost")), traces.join(","));
-
-                isRestricted = false;
-                __runs.deferRuns = false;
-                for (const callback of __runs.queue.splice(0)) callback();
-            } finally {
-                isRestricted = false;
-                __runs.deferRuns = false;
-                __runs.queue.length = 0;
-            }
-            check("the deferred settle hands the item back", pocket.slots.some((slot) => slot?.typeId === "minecraft:torch"), JSON.stringify(pocket.slots.filter(Boolean)));
-            check("it removes the entity", !entity.isValid);
-            check("and empties the surface", menu.slots.every((slot) => !slot));
-        }
-
-        // A form's onClose that throws is reported, not left as an unhandled rejection.
-        {
-            freshRuntime();
-            const { ContainerFormData } = await load("platform/surface/openForm.js");
-            const { viewer } = menuWorld({ entityId: "surface-form", playerId: "player-form" });
-            const records = [];
-            let isRejected = false;
-            const onRejection = () => {
-                isRejected = true;
-            };
-            core.setLogger((record) => records.push(record));
-            process.on("unhandledRejection", onRejection);
-            try {
-                const session = new ContainerFormData(27)
-                    .onClose(() => {
-                        throw new Error("form-close-boom");
-                    })
-                    .open(viewer);
-                session.close();
-                await new Promise((resolve) => setTimeout(resolve, 0));
-                check(
-                    "a form onClose that throws is reported through the logger",
-                    !isRejected && records.some((record) => record.message.includes("form-close-boom")),
-                    `rejected=${isRejected} records=${records.map((record) => record.message).join(" | ")}`,
-                );
-            } finally {
-                process.off("unhandledRejection", onRejection);
-                core.setLogger(null);
-            }
-        }
+        await checkReadOnlyClose({ check, load, loadEngine, core, freshRuntime, menuWorld, BedrockSurface, ItemStack });
     }
 };

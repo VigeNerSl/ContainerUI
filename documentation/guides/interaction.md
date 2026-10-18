@@ -245,6 +245,7 @@ A menu closes when:
 | `"programmatic"` | Your code called `close()`: `SlotEvent.close()`, `ContainerSession.close()`, or opening another menu for the same player. |
 | `"distance"` | The player moved more than 8 blocks from the menu entity (`maxViewDistance`). |
 | `"invalidated"` | The player left the world, or the menu entity disappeared; or the menu could not open. |
+| `"timeout"` | A menu opened with `openBy: "click"` was never clicked within `clickWaitTicks`. |
 
 On close, in this order:
 

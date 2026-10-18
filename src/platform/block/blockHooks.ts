@@ -104,7 +104,8 @@ const isStorageOf = (entity: Entity, container: RegisteredContainer): boolean =>
  * already at the position is kept only when it is this component's own; one left by another block
  * that was replaced without a break is settled like an orphan, and a fresh one takes its place.
  */
-export const onBlockPlaced = (container: RegisteredContainer, { block, dimension }: BlockHookEvent): void => {
+export const onBlockPlaced = (container: RegisteredContainer, vigenersl: BlockHookEvent): void => {
+    const { block, dimension } = vigenersl;
     const { componentName, options, staticTitle, emit } = container;
     const location = copyLocation(block.location);
     const blockTypeId = block.typeId;
@@ -134,7 +135,8 @@ export const onBlockPlaced = (container: RegisteredContainer, { block, dimension
 };
 
 /** A click that reaches the block itself: a menu opens; a native block's own entity should have taken it. */
-export const onBlockInteracted = (container: RegisteredContainer, { block, dimension, player }: BlockHookEvent): void => {
+export const onBlockInteracted = (container: RegisteredContainer, vigenersl: BlockHookEvent): void => {
+    const { block, dimension, player } = vigenersl;
     if (!player) return;
     const { componentName, openMode, emit } = container;
     const key = blockKeyOf(dimension.id, block.location);
@@ -152,7 +154,8 @@ export const onBlockInteracted = (container: RegisteredContainer, { block, dimen
     });
 };
 
-export const onBlockBrokenByPlayer = (container: RegisteredContainer, { block, dimension, player }: BlockHookEvent): void => {
+export const onBlockBrokenByPlayer = (container: RegisteredContainer, vigenersl: BlockHookEvent): void => {
+    const { block, dimension, player } = vigenersl;
     const key = blockKeyOf(dimension.id, block.location);
     const playerField = player ? { player: player.name } : {};
 
@@ -166,7 +169,8 @@ export const onBlockBrokenByPlayer = (container: RegisteredContainer, { block, d
 };
 
 /** Breaks without a player: explosions, commands, other blocks. */
-export const onBlockBroken = (container: RegisteredContainer, { block, dimension, entitySource, blockDestructionSource }: BlockHookEvent): void => {
+export const onBlockBroken = (container: RegisteredContainer, vigenersl: BlockHookEvent): void => {
+    const { block, dimension, entitySource, blockDestructionSource } = vigenersl;
     if (entitySource?.typeId === "minecraft:player") return;
     const location = copyLocation(block.location);
     const key = blockKeyOf(dimension.id, location);

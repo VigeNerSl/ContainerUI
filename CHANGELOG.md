@@ -2,6 +2,79 @@
 
 Every public release, newest first. Breaking changes are listed under their own heading.
 
+## 1.0.0-beta.4 - 2026-10-18
+
+The shared packs are now version `1.0.2`: they add the entity behind storages opened by click, and the
+menu entity's seat moves into a component group a menu opened by click removes. Install the new packs
+with this release.
+
+### Breaking
+
+- **`CloseReason` gains `"timeout"`**: a menu opened by click that was never clicked. An exhaustive
+  `switch` over close reasons needs the branch.
+- **`ShulkerReadEvent.kind` gains `"written"`**, reported by `writeShulkerContents`. The same goes for
+  an exhaustive `switch` over it.
+
+### Added
+
+- **Storages opened by click.** `installHeldItem` makes an item open a storage when a player sneaks
+  with it in hand; `openHeldStorage` opens one from your own code. An entity in the player's head shows
+  the storage's contents, the player's click opens it as the game's own chest, and every change is
+  written into the storage in the tick it happens. The storage keeps the items throughout and the
+  entity's copy is never handed out, so a restart or a crash copies none; a crash rolls the player
+  and the storage back together to the game's last save. A player who leaves with the screen open has
+  the screen as they left it written into the storage when they come back, so a take in their last
+  moment is not kept twice. Sources: `shulkerBoxSource()` (the shulker box in hand, locked in its slot
+  while open), `enderChestSource()`, or your own `HeldSource`; `registerHeldSource(kind, { release,
+  resume })` says how a kind of your own cleans up after an open cut short. `matches(item, player)`
+  decides per player, such as only for players with a tag. Types: `HeldSource`, `HeldWriteResult`,
+  `HeldKind`, `HeldRelease`, `HeldResume`, `HeldReport`, `HeldItemOptions`, `HeldStorageOptions`,
+  `HeldOpenOptions`, `HeldOpenEvent`. See [Storages opened by click](documentation/guides/held-storage.md).
+- **`openBy: "click"`.** A menu can open without the inventory key: its entity spawns in the player's
+  head, or at a point given by `clickAt`, and the player's click on it opens the screen. Nobody is
+  seated, and the entity has no seat, since a click on a rideable entity seats the player instead. A
+  click by another player is cancelled, and a menu never clicked closes with `"timeout"` once
+  `clickWaitTicks` (default `CLICK_OPEN_WAIT_TICKS`, 100) have passed, within the 10 ticks the
+  watchdog takes, refusing a click meanwhile. An `openBy` other than `"seat"` or `"click"`, and a
+  `clickAt` that is not `"head"` or a point, throw a `RangeError`. The default, `"seat"`, is unchanged.
+  Types: `SurfaceOpenMode`, `SurfaceClickPoint`.
+- **`PlayerEnderStorage`**, a player's ender chest as a storage, and `enderContainerOf(player)`.
+- **`writeShulkerContents`**, which makes a shulker box item holding the contents you give it, in one
+  tick. Another shulker box is refused and returned in `leftovers`, as the game refuses it, and so is
+  an item no stack can be made from. Type: `ShulkerWriteResult`.
+- **`EntityInventoryStorage._containerOf(entity)`**, a protected member, so a storage can keep its
+  items in another of the entity's containers.
+
+### Fixed
+
+- **The player's own items no longer vanish when a sweep has no room for them.** A copy of a menu
+  button in a bundle is taken out with the player's own items left in place; those that did not fit
+  back were reported lost and gone. They now go to the player's inventory, and what does not fit there
+  drops at their feet, or at the centre of the block for a container's sweep, only once the cleaned
+  bundle is written.
+- **Fixed a duplication through a thrown bundle.** A thrown bundle holding a copy is replaced by a
+  clean one; if the thrown one could not be removed, both stayed. The clean copy is now taken back
+  then.
+- **Fixed menu items surviving a restart.** The anti-duplication guard was installed by the first
+  menu, so after a server restart a player who joined before anyone opened a menu was never swept,
+  and a copy in their inventory, or in a bundle there, survived. `installBedrockRuntime()` now installs
+  the guard, and the guard sweeps every player already in the world on the next tick, which also
+  covers a script reload. It sweeps the player's ender chest too.
+- **A block's storage is released when its seated menu closes**, instead of staying in memory until
+  the block was broken.
+- **A click on someone's menu entity is now cancelled** for any other player, in both open modes, and
+  so is the viewer's own click before their menu is ready.
+- **A menu entity a restart left behind keeps no player's item when the engine refuses to remove
+  it:** the items it held still go back to its viewer.
+
+### Changed
+
+- `installBedrockRuntime()` also installs the hooks of storages opened by click, which settle what an
+  open cut short left: copies in the world, a screen a player left open, and a shulker box still
+  locked on a player who joins.
+- The item guard and the scan read less per tick: a plain item costs one read in the guard, a slot's
+  type is compared before the whole stack, and container sizes are read once per pass.
+
 ## 1.0.0-beta.3 - 2026-10-12
 
 The shared packs keep version `1.0.1`. The settings text of ContainerUI BP now shows the pack version

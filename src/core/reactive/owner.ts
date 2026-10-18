@@ -87,6 +87,8 @@ export const onCleanup = (cleanup: Dispose): void => {
 
 /** Disposes a scope's children, then runs its cleanups in reverse order. A throwing cleanup is reported and does not stop the rest. */
 const releaseContents = (scope: Scope): void => {
+    // Most effect runs have nothing to release: they allocate nothing here.
+    if (scope.children.size === 0 && scope.disposables.length === 0) return;
     for (const child of Array.from(scope.children)) {
         disposeScope(child);
     }

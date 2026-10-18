@@ -106,6 +106,71 @@ export const WATCHDOG_INTERVAL_TICKS = 10;
 export const STORAGE_BUTTON_CHECK_INTERVAL_TICKS = 10;
 /** Blocks the viewer may drift from the surface entity before it closes. */
 export const MAX_VIEW_DISTANCE = 8;
+/**
+ * Ticks a menu opened with `openBy: "click"`, or a storage opened by click, waits for the click before
+ * it closes, unless `clickWaitTicks` says otherwise.
+ */
+export const CLICK_OPEN_WAIT_TICKS = 100;
+/**
+ * Surface entity event giving it a block-sized collision box, so a click at a chosen point can land
+ * on it. In the viewer's head the point-sized box is enough: the click starts inside it.
+ */
+export const SURFACE_CLICK_BOX_EVENT = `${NAMESPACE}:click_box`;
+/** The component group {@link SURFACE_CLICK_BOX_EVENT} adds. */
+export const SURFACE_CLICK_BOX_GROUP = `${NAMESPACE}:click_box`;
+/**
+ * Surface entity component group with its seat, added as it spawns. A click on a rideable entity
+ * seats the player instead of opening it, so a menu opened by click goes without.
+ */
+export const SURFACE_SEAT_GROUP = `${NAMESPACE}:seat`;
+/** Surface entity event removing {@link SURFACE_SEAT_GROUP}, for a menu opened by click. */
+export const SURFACE_NO_SEAT_EVENT = `${NAMESPACE}:no_seat`;
+/**
+ * Surface entity dynamic property: its viewer's id. Dynamic properties belong to the pack that set
+ * them, so it tells this pack's surface entities from another pack's.
+ */
+export const SURFACE_VIEWER_PROPERTY = `${NAMESPACE}:surface_viewer`;
+/**
+ * Surface entity dynamic property: its mirror slots, as comma-separated indices. A mirror slot holds
+ * an unmarked copy of an item its storage keeps, so an orphaned entity must not hand it out.
+ */
+export const SURFACE_MIRRORED_PROPERTY = `${NAMESPACE}:surface_mirrored`;
+/** Player component holding the ender chest's contents. */
+export const ENDER_INVENTORY_COMPONENT_ID = "minecraft:ender_inventory";
+
+// A storage opened by click
+
+/**
+ * Entity showing a copy of a storage while its owner has it open: point-sized, in their head, and
+ * closed to hoppers. The storage itself keeps the items; the entity's copy is never handed out.
+ */
+export const HELD_STORAGE_ENTITY_TYPE_ID = `${NAMESPACE}:held_storage`;
+/** Dynamic property on a shulker box item: the open it is the source of. */
+export const SHULKER_SESSION_PROPERTY = `${NAMESPACE}:shulker_session`;
+/** Dynamic property on a shulker box item: the lock it had before an open locked it in its slot. */
+export const SHULKER_LOCK_PROPERTY = `${NAMESPACE}:shulker_lock`;
+/**
+ * Held storage entity dynamic property: its owner's id. Dynamic properties belong to the pack that
+ * set them, so it also tells this pack's held entities from another pack's.
+ */
+export const HELD_STORAGE_OWNER_PROPERTY = `${NAMESPACE}:held_owner`;
+/**
+ * Held storage entity dynamic property, set when its owner left with the screen open: the kind of
+ * source and its key, to write the screen into the storage when they come back.
+ */
+export const HELD_STORAGE_PENDING_PROPERTY = `${NAMESPACE}:held_pending`;
+/**
+ * World dynamic property prefix, followed by a player's id: the ids of their held entities kept for
+ * their return. Until those are written, nothing else opens for them and nothing an open left on them
+ * is undone.
+ */
+export const HELD_STORAGE_RETURN_PREFIX = `${NAMESPACE}:held_return_`;
+/** How often, in ticks, a returning owner's kept screens are looked for and tried again. */
+export const HELD_RESUME_RETRY_TICKS = 5;
+/** How many times, before the storage keeps what was last written. */
+export const HELD_RESUME_ATTEMPTS = 20;
+/** Ticks a closed screen waits for a write the storage keeps refusing before it is kept for the owner's return. */
+export const HELD_CLOSE_RETRY_TICKS = 100;
 
 // Block storage
 

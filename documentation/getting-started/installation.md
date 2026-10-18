@@ -202,9 +202,10 @@ The UUIDs of the shared packs never change:
 | ContainerUI RP | `5d3a0ae4-d90d-4d25-8a23-80bc25f83ad7` |
 
 The pack version is counted apart from the library's and goes up whenever a release changes the packs:
-`1.0.0-beta.1` shipped pack `1.0.0`, and `1.0.0-beta.2` raised it to `1.0.1`, which `1.0.0-beta.3`
-keeps. A game keeps a pack it has downloaded or imported under its UUID and version, so a newer pack
-replaces the old copy only when its version is higher. Your add-on still carries the library's scripts
+`1.0.0-beta.1` shipped pack `1.0.0`, `1.0.0-beta.2` raised it to `1.0.1`, which `1.0.0-beta.3`
+keeps, and `1.0.0-beta.4` raises it to `1.0.2` for the entity behind storages opened by click. A game
+keeps a pack it has downloaded or imported under its UUID and version, so a newer pack replaces the
+old copy only when its version is higher. Your add-on still carries the library's scripts
 itself, since scripts cannot be shared between packs; only the entities and layouts are shared. Every
 pack's scripts run in a context of their own, so any number of add-ons can carry the library side by
 side.
@@ -244,10 +245,12 @@ installBedrockRuntime();
 ```
 
 It installs a scheduler that commits every change made in one tick together, at the end of that
-tick, and a time source for animations and timers. `openContainer` calls it for you too, so a menu
-works without it, but anything reactive that runs *before* the first menu opens — an `effect()` at
-startup, a `computed` you read — would otherwise fall back to microtask scheduling and log a
-warning. Calling it once at startup avoids that. The call is idempotent.
+tick, a time source for animations and timers, and the anti-duplication guard.
+`openContainer` calls it for you too, so a menu works without it, but call it at startup anyway: the
+guard then sweeps every player who joins after a server restart, before anyone opens a menu, so a menu
+item that outlived the restart is removed. Anything reactive that runs *before* the first menu opens —
+an `effect()` at startup, a `computed` you read — would otherwise also fall back to microtask
+scheduling and log a warning. The call is idempotent.
 
 See [The Bedrock runtime](../guides/bedrock-runtime.md) for its option (`budgetMs`, applied only on
 the first call) and for `uninstallBedrockRuntime()`.

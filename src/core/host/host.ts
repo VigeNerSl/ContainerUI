@@ -102,7 +102,7 @@ export interface HostInteraction {
 }
 
 /** Why a surface closed. */
-export type CloseReason = "player" | "programmatic" | "invalidated" | "distance";
+export type CloseReason = "player" | "programmatic" | "invalidated" | "distance" | "timeout";
 
 /** A rendering surface: one open container for one viewer. */
 export interface HostAdapter {
@@ -203,7 +203,7 @@ export const areItemsEqual = (first: ItemView | null, second: ItemView | null): 
  * Whether two items are the same potion: the same effect, delivered the same way. Two items
  * without a potion are the same.
  *
- * @internal Shared with the platform's slot matching.
+ * @internal
  */
 export const arePotionsEqual = (first: ItemPotion | undefined, second: ItemPotion | undefined): boolean => {
     if (!first || !second) return !first && !second;
@@ -213,9 +213,11 @@ export const arePotionsEqual = (first: ItemPotion | undefined, second: ItemPotio
 /**
  * Whether two items ask for the same block states. Absent states equal none.
  *
- * @internal Shared with the platform's slot matching.
+ * @internal
  */
 export const areBlockStatesEqual = (first: ItemView["blockStates"], second: ItemView["blockStates"]): boolean => {
+    // Most items have none: compared on every commit, they allocate nothing.
+    if (!first && !second) return true;
     const firstKeys = Object.keys(first ?? {});
     if (firstKeys.length !== Object.keys(second ?? {}).length) return false;
     return firstKeys.every((key) => first?.[key] === second?.[key]);
@@ -260,6 +262,7 @@ export const areEnchantmentsEqual = (
     const firstList = first ?? EMPTY_ENCHANTMENTS;
     const secondList = second ?? EMPTY_ENCHANTMENTS;
     if (firstList.length !== secondList.length) return false;
+    if (firstList.length === 0) return true;
     const countIn = (list: readonly ItemEnchantment[], wanted: ItemEnchantment): number => {
         return list.filter((entry) => entry.id === wanted.id && entry.level === wanted.level).length;
     };

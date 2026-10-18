@@ -12,7 +12,7 @@ export const LIBRARY_VERSION = PACKAGE.version;
  * downloaded or imported under its UUID and version, so raise it with every release that changes
  * what the packs contain, or players keep the previous copy.
  */
-export const PACK_VERSION = [1, 0, 1];
+export const PACK_VERSION = [1, 0, 2];
 
 export const MIN_ENGINE_VERSION = (process.env.CUI_MIN_ENGINE ?? "1.26.20").split(".").map(Number);
 

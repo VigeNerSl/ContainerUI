@@ -40,6 +40,7 @@ The library ships these storages:
 | `MemoryStorage` | plain views in memory | `createMemoryStorage(size, initial?)` |
 | `BlockStorage` | a block container's storage entity | `BlockStorage.forEntity(entity)` (usually through [block containers](block-containers.md)) |
 | `PlayerInventoryStorage` | a player's 36 inventory slots | `PlayerInventoryStorage.forPlayer(player)` |
+| `PlayerEnderStorage` | a player's 27 ender chest slots | `PlayerEnderStorage.forPlayer(player)` |
 | `EntityInventoryStorage` | any entity's inventory | subclass it, see [below](#your-own-entity-storage) |
 
 ## `StorageSlots`
@@ -186,6 +187,30 @@ function InventoryMirror({ player }: { player: Player }) {
 
 `PLAYER_INVENTORY_WATCH_INTERVAL_TICKS` (2) is the default watch interval.
 
+## A player's ender chest
+
+`PlayerEnderStorage.forPlayer(player)` is the player's ender chest as a storage: the 27 slots every
+ender chest shows them. Unlike their inventory it is not on screen under a menu, so `StorageSlots`
+over it is the usual way to show it; what the menu writes is what every ender chest then shows them.
+
+```tsx
+function EnderChest({ player }: { player: Player }) {
+    const storage = PlayerEnderStorage.forPlayer(player);
+
+    useEffect(() => {
+        storage.startWatching();
+        return () => storage.stopWatching();
+    }, []);
+
+    return <StorageSlots storage={storage} />;
+}
+```
+
+It works like the inventory storage: one instance per player, watching is reference-counted, it is
+dropped when the player leaves, and `PlayerEnderStorage.evict(playerId)` drops it yourself.
+`enderContainerOf(player)` returns the ender chest's `Container`, or `null` when the game has not given
+the player one yet.
+
 ## Block storages
 
 `BlockStorage.forEntity(entity)` wraps the storage entity of a [block container](block-containers.md).
@@ -205,7 +230,7 @@ Every write through a block storage is logged as a `storage-write` [block record
 
 ## Entity storages
 
-`BlockStorage` and `PlayerInventoryStorage` share a base class, `EntityInventoryStorage`, which you
+`BlockStorage`, `PlayerInventoryStorage` and `PlayerEnderStorage` share a base class, `EntityInventoryStorage`, which you
 can extend for any entity with an inventory (a backpack entity, a mount, a custom NPC).
 
 Every entity storage has:
@@ -271,6 +296,7 @@ export class BackpackStorage extends EntityInventoryStorage {
 | `_onReadFailure(detail)` | Once per outage, when a read fails. |
 | `_entity()` | The entity, or `null` once gone (re-resolved by id). |
 | `_container()` | Its inventory container, or `null`. |
+| `_containerOf(entity)` | Which of the entity's containers is the storage. Defaults to its `minecraft:inventory`; override it to store elsewhere, such as `enderContainerOf(entity)` for a player's ender chest, which also turns an invalid container or a failed read into `null`. |
 | `_dispose()` | Stops the watch for good and forgets every view. Call it when you drop the storage. |
 
 Keep one instance per entity, as above. Two instances over one entity would each have their own

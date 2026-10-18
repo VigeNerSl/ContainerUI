@@ -1,12 +1,11 @@
 /** Destroys rendered items that escape a menu, and refuses their use. */
 
 import {
-    EquipmentSlot,
+    system,
     world,
     type Block,
     type BlockContainerClosedAfterEvent,
     type BlockContainerOpenedAfterEvent,
-    type BlockInventoryComponent,
     type Container,
     type ContainerAccessSource,
     type EntityContainerClosedAfterEvent,
@@ -15,18 +14,20 @@ import {
     type EntityItemDropAfterEvent,
     type EntityLoadAfterEvent,
     type EntitySpawnAfterEvent,
-    type EntityEquippableComponent,
     type EntityItemComponent,
     type ItemStack,
+    type ItemUseBeforeEvent,
     type Player,
+    type PlayerInteractWithBlockBeforeEvent,
+    type PlayerInteractWithEntityBeforeEvent,
     type PlayerSpawnAfterEvent,
 } from "@minecraft/server";
 import { log } from "../../core/logging/logger.js";
-import { EQUIPPABLE_COMPONENT_ID, INVENTORY_COMPONENT_ID, ITEM_COMPONENT_ID, ITEM_ENTITY_TYPE_ID, SURFACE_ENTITY_TYPE_ID } from "../constants.js";
-import { inventoryContainerOf } from "../storage/inventoryContainer.js";
-import { isRenderedItem, stripLoreMarker } from "./itemMarker.js";
-import { addOwnItems, storageContainerOf, takeOwnItemsOut } from "./storageItems.js";
-import { probeOfStack } from "../scan/slotHandles.js";
+import { HELD_STORAGE_ENTITY_TYPE_ID, ITEM_COMPONENT_ID, ITEM_ENTITY_TYPE_ID, SURFACE_ENTITY_TYPE_ID } from "../constants.js";
+import { blockContainerOf, enderContainerOf, inventoryContainerOf } from "../storage/inventoryContainer.js";
+import { isRenderedItem } from "./itemMarker.js";
+import { takeOwnItemsOut } from "./storageItems.js";
+import { removedProbeOf, scrubContainer, scrubInventoryOf, scrubStorageItem, setLostItemReporter, spillAt, spillToPlayer, type Place } from "./itemSweeps.js";
 import type { SlotProbe } from "../scan/slotMatching.js";
 import { onUninstall, type WorldSignal } from "../lifecycle.js";
 
@@ -49,15 +50,6 @@ export interface ItemGuardStats {
  */
 export type MarkedItemListener = (probe: SlotProbe, ownerId?: string) => boolean;
 
-/** Worn slots and the off hand; the main hand is part of the inventory container. */
-const SCRUBBED_EQUIPMENT: readonly EquipmentSlot[] = [
-    EquipmentSlot.Head,
-    EquipmentSlot.Chest,
-    EquipmentSlot.Legs,
-    EquipmentSlot.Feet,
-    EquipmentSlot.Offhand,
-];
-
 const stats: ItemGuardStats = { inspected: 0, destroyed: 0, removalFailed: 0 };
 const listeners = new Set<MarkedItemListener>();
 
@@ -76,27 +68,16 @@ const report = (detail: string): void => {
     }
 };
 
-/** A player's own item, taken out of a removed copy, that nothing could take. */
-const reportLost = (stack: ItemStack): void => report(`reason=sweep own-item-lost item=${stack.typeId} amount=${stack.amount}`);
-
-/** A removed copy's probe, with its lore: the one read that tells two buttons of one kind apart. */
-const removedProbeOf = (stack: ItemStack): SlotProbe => {
-    const probe = probeOfStack(stack);
-    try {
-        return { ...probe, lore: stripLoreMarker(stack.getLore()) };
-    } catch {
-        return probe;
-    }
-};
-
+/** Offers a destroyed copy to the listeners until one claims it. */
 const announce = (probe: SlotProbe, ownerId?: string): void => {
-    for (const listener of Array.from(listeners)) {
+    Array.from(listeners).some((listener) => {
         try {
-            if (listener(probe, ownerId)) return;
+            return listener(probe, ownerId);
         } catch {
             // A listener must not break the guard.
+            return false;
         }
-    }
+    });
 };
 
 /** Subscribes to a world event until uninstall, with the handler guarded, and reports an event that is missing. */
@@ -148,7 +129,7 @@ const stackOf = (itemEntity: Entity): ItemStack | undefined => {
 };
 
 /** Removes `candidate` if it is a loose rendered item, and announces it. */
-const destroyIfRendered = (candidate: Entity | undefined, reason: string, ownerId?: string): boolean => {
+const destroyIfRendered = ({ candidate, reason, ownerId }: { candidate: Entity | undefined; reason: string; ownerId?: string | undefined }): boolean => {
     // Cheap rejections first: this runs for every entity spawn in the world.
     if (!candidate) return false;
     if (candidate.typeId !== ITEM_ENTITY_TYPE_ID) return false;
@@ -171,15 +152,45 @@ const destroyIfRendered = (candidate: Entity | undefined, reason: string, ownerI
         return false;
     }
     // Only once the copy is gone: the player's own items left beside it would be a second set.
-    own.forEach((ownStack) => {
-        try {
-            dimension.spawnItem(ownStack, location);
-        } catch (error) {
-            report(`reason=${reason} own-item-lost item=${ownStack.typeId} amount=${ownStack.amount} error=${String(error)}`);
-        }
-    });
+    own.forEach(spillAt({ dimension, location }));
     announce(removedProbeOf(stack), ownerId);
     return true;
+};
+
+/**
+ * Replaces a thrown storage item that holds rendered copies with a clean one. A loose item's stack
+ * cannot be written, so a clean copy is spawned in its place before the old one goes: a failed spawn
+ * leaves the player's storage item where it was, and a failed removal takes the clean copy back.
+ * Own items that did not fit back into it drop beside it.
+ */
+const cleanThrownStorage = ({ candidate, ownerId }: { candidate: Entity; ownerId: string | undefined }): void => {
+    if (candidate.typeId !== ITEM_ENTITY_TYPE_ID || !candidate.isValid) return;
+    const stack = stackOf(candidate);
+    if (!stack || isRenderedItem(stack)) return;
+    const probes: SlotProbe[] = [];
+    const spilled: ItemStack[] = [];
+    const removed = scrubStorageItem(stack, { onRemoved: (probe) => probes.push(probe), spill: (own) => spilled.push(own) });
+    if (removed === 0) return;
+    const { dimension, location } = candidate;
+    let clean: Entity;
+    try {
+        clean = dimension.spawnItem(stack, location);
+    } catch (error) {
+        report(`reason=drop storage-respawn-failed item=${stack.typeId} error=${String(error)}`);
+        return;
+    }
+    try {
+        candidate.remove();
+    } catch (error) {
+        // Two of the player's storage items would lie there: the clean one goes back.
+        if (clean.isValid) clean.remove();
+        report(`reason=drop storage-removal-failed item=${stack.typeId} error=${String(error)}`);
+        return;
+    }
+    // Only once the old one is gone: the own items that did not fit back would otherwise be a second set.
+    spilled.forEach(spillAt({ dimension, location }));
+    report(`reason=drop item=${stack.typeId} swept=${removed}`);
+    probes.forEach((probe) => announce(probe, ownerId));
 };
 
 /** Cancels an action performed with a rendered stack. */
@@ -199,117 +210,161 @@ const refuseMarked = ({
     if (isReported) report(`reason=${reason} item=${stack.typeId}`);
 };
 
-const scrubEquipmentOf = (player: Player, onRemoved?: (probe: SlotProbe) => void): number => {
-    let equippable: EntityEquippableComponent | undefined;
-    try {
-        equippable = player.getComponent(EQUIPPABLE_COMPONENT_ID) as EntityEquippableComponent | undefined;
-    } catch {
-        return 0;
-    }
-    if (!equippable) return 0;
-
-    let removed = 0;
-    for (const slot of SCRUBBED_EQUIPMENT) {
-        // One unreadable slot must not hide the ones already cleaned, or the ones after it.
-        try {
-            const stack = equippable.getEquipment(slot);
-            if (!stack) continue;
-            if (!isRenderedItem(stack)) {
-                removed += cleanStorageIn({ stack, write: () => equippable.setEquipment(slot, stack), onRemoved });
-                continue;
-            }
-            const own = takeOwnItemsOut(stack);
-            equippable.setEquipment(slot);
-            removed++;
-            onRemoved?.(removedProbeOf(stack));
-            addOwnItems(inventoryContainerOf(player), own).forEach(reportLost);
-        } catch {
-            continue;
-        }
-    }
-    return removed;
-};
-
-/** Removes rendered copies from a container, and from the storage items in it. An empty one is left without reading a slot. */
-const scrubContainer = (container: Container | null | undefined, onRemoved?: (probe: SlotProbe) => void): number => {
-    let removed = 0;
-    try {
-        if (!container || container.emptySlotsCount === container.size) return 0;
-        for (let index = 0; index < container.size; index++) {
-            const stack = container.getItem(index);
-            if (!stack) continue;
-            if (!isRenderedItem(stack)) {
-                removed += cleanStorageIn({ stack, write: () => container.setItem(index, stack), onRemoved });
-                continue;
-            }
-            const own = takeOwnItemsOut(stack);
-            container.setItem(index, undefined);
-            onRemoved?.(removedProbeOf(stack));
-            removed++;
-            addOwnItems(container, own).forEach(reportLost);
-        }
-    } catch {
-        // The container went mid-sweep.
-    }
-    return removed;
+/** The container of a valid entity, or `null`. */
+const entityContainerOf = (entity: Entity | undefined): Container | null => {
+    return entity?.isValid ? inventoryContainerOf(entity) : null;
 };
 
 /**
- * Removes rendered copies from inside a storage item, such as a bundle, and from the storage items
- * nested in it. A button put in a bundle leaves the menu with no trace in any slot the scan reads.
+ * Sweeps a player's inventory, worn slots and ender chest; the copies removed go to `onRemoved`.
  *
- * @param stack Any stack. It is changed in place, so a caller that read it as a copy writes it back.
- * @param onRemoved Called with each copy removed.
- * @returns How many stacks were removed; 0 for an item that stores nothing.
+ * @returns How many stacks were removed.
  */
-export const scrubStorageItem = (stack: ItemStack, onRemoved?: (probe: SlotProbe) => void): number => {
-    return scrubContainer(storageContainerOf(stack), onRemoved);
+const scrubPlayer = (player: Player, onRemoved?: (probe: SlotProbe) => void): number => {
+    return scrubInventoryOf(player, onRemoved) + scrubContainer(enderContainerOf(player), { onRemoved, spill: spillToPlayer(player) });
 };
 
 /**
- * Cleans a storage item read from a slot and writes it back there. Reads hand out copies, so the
- * cleaning sticks only once written, and the copies removed are announced only after that: a failed
- * write leaves them for the next sweep, not counted as gone.
- *
- * @returns How many stacks were removed; 0 when nothing was, or the write failed.
+ * Sweeps a container someone opened or closed, and the player who did, their ender chest included,
+ * which every ender chest shows them. Each copy removed is announced as that player's, like a thrown
+ * one. Their own items that do not fit back go to them, or, with nobody known, drop at the container's
+ * place.
  */
-const cleanStorageIn = ({ stack, write, onRemoved }: { stack: ItemStack; write: () => void; onRemoved: ((probe: SlotProbe) => void) | undefined }): number => {
-    const probes: SlotProbe[] = [];
-    const removed = scrubStorageItem(stack, (probe) => probes.push(probe));
-    if (removed === 0) return 0;
-    try {
-        write();
-    } catch {
-        return 0;
-    }
-    if (onRemoved) probes.forEach(onRemoved);
-    return removed;
-};
-
-const scrubContainerOf = (player: Player, onRemoved?: (probe: SlotProbe) => void): number => {
-    return scrubContainer(inventoryContainerOf(player), onRemoved);
-};
-
-/** A block's container, or `null` for a block that has none or cannot be read. */
-const blockContainerOf = (block: Block | undefined): Container | null => {
-    try {
-        return (block?.getComponent(INVENTORY_COMPONENT_ID) as BlockInventoryComponent | undefined)?.container ?? null;
-    } catch {
-        return null;
-    }
-};
-
-/**
- * Sweeps a container someone opened or closed, and the player who did. Each copy removed is
- * announced as that player's, like a thrown one.
- */
-const sweepAccessed = ({ container, source, reason }: { container: Container | null; source: ContainerAccessSource | undefined; reason: string }): void => {
+const sweepAccessed = ({
+    container,
+    place,
+    source,
+    reason,
+}: {
+    container: Container | null;
+    place: Place | undefined;
+    source: ContainerAccessSource | undefined;
+    reason: string;
+}): void => {
     const accessor = source?.entity;
     const player = accessor?.typeId === "minecraft:player" ? (accessor as Player) : undefined;
     const ownerId = player?.id;
-    const announceRemoved = (probe: SlotProbe): void => announce(probe, ownerId);
-    const removed = scrubContainer(container, announceRemoved) + (player ? scrubInventoryOf(player, announceRemoved) : 0);
+    const onRemoved = (probe: SlotProbe): void => announce(probe, ownerId);
+    const spill = player ? spillToPlayer(player) : place ? spillAt(place) : undefined;
+    const removed = scrubContainer(container, { onRemoved, spill }) + (player ? scrubPlayer(player, onRemoved) : 0);
     if (removed > 0) report(`reason=${reason} swept=${removed}`);
+};
+
+/** Sweeps one player, their ender inventory included, and reports what went. */
+const sweepPlayer = (player: Player, reason: string): void => {
+    const removed = scrubPlayer(player);
+    if (removed > 0) report(`reason=${reason} player=${player.name} swept=${removed}`);
+};
+
+/**
+ * Everyone already in the world when the guard installs: after a script reload nobody joins, and an
+ * add-on that installs the guard with its first menu has missed every join before it.
+ */
+const sweepOnlinePlayers = (): void => {
+    try {
+        world.getAllPlayers().forEach((player) => sweepPlayer(player, "install"));
+    } catch (error) {
+        report(`reason=install sweep-failed error=${String(error)}`);
+    }
+};
+
+/** A thrown item: the only event that names the thrower. */
+const onItemDropped = (vigenersl: EntityItemDropAfterEvent): void => {
+    const { entity, items } = vigenersl;
+    const ownerId = entity?.id;
+    const dropped = droppedEntitiesOf(items);
+    if (dropped.length === 0) {
+        report(`reason=drop items-unreadable owner=${ownerId ?? "unknown"}`);
+        return;
+    }
+    dropped.forEach((item) => {
+        if (!destroyIfRendered({ candidate: item, reason: "drop", ownerId })) cleanThrownStorage({ candidate: item, ownerId });
+    });
+};
+
+/** A loose item spawned during play. One loaded with its chunk goes through `onEntityLoaded` instead. */
+const onEntitySpawned = (vigenersl: EntitySpawnAfterEvent): void => {
+    const { entity } = vigenersl;
+    destroyIfRendered({ candidate: entity, reason: "spawn" });
+};
+
+/**
+ * A loose item in a chunk that has just loaded: a copy lying on the ground when the world last
+ * saved is not a spawn, so `entitySpawn` never saw it.
+ */
+const onEntityLoaded = (vigenersl: EntityLoadAfterEvent): void => {
+    const { entity } = vigenersl;
+    destroyIfRendered({ candidate: entity, reason: "load" });
+};
+
+/** A player who logged out holding a copy. */
+const onPlayerJoined = (vigenersl: PlayerSpawnAfterEvent): void => {
+    const { player, initialSpawn } = vigenersl;
+    if (initialSpawn) sweepPlayer(player, "join");
+};
+
+/** Where what a block's sweep cannot put back drops: the centre of the block, not its corner. */
+const centreOf = (block: Block): Place | undefined => {
+    try {
+        return { dimension: block.dimension, location: block.center() };
+    } catch {
+        return undefined;
+    }
+};
+
+/**
+ * A chest, furnace, hopper or ender chest: its contents and whoever opened it are swept. On open,
+ * because a hopper can have filled it unopened; on close, for a copy put in while it was open.
+ */
+const onBlockContainerOpened = (vigenersl: BlockContainerOpenedAfterEvent): void => {
+    const { block, openSource } = vigenersl;
+    sweepAccessed({ container: blockContainerOf(block), place: centreOf(block), source: openSource, reason: "container-opened" });
+};
+
+const onBlockContainerClosed = (vigenersl: BlockContainerClosedAfterEvent): void => {
+    const { block, closeSource } = vigenersl;
+    sweepAccessed({ container: blockContainerOf(block), place: centreOf(block), source: closeSource, reason: "container-closed" });
+};
+
+/**
+ * Whether an entity's container is swept by its own owner: a menu entity's slots are the menu's
+ * copies and its viewer's inventory the menu's to sweep, whichever pack spawned it; a held storage
+ * entity's slots are the storage's items, which its open writes through and never hands out twice.
+ */
+const isSweptElsewhere = (entity: Entity | undefined): boolean => {
+    return entity?.typeId === SURFACE_ENTITY_TYPE_ID || entity?.typeId === HELD_STORAGE_ENTITY_TYPE_ID;
+};
+
+/** A chest minecart, a donkey, a llama, a block's storage entity: swept on open and on close. */
+const onEntityContainerOpened = (vigenersl: EntityContainerOpenedAfterEvent): void => {
+    const { entity, openSource } = vigenersl;
+    if (isSweptElsewhere(entity)) return;
+    sweepAccessed({ container: entityContainerOf(entity), place: entity?.isValid ? entity : undefined, source: openSource, reason: "entity-container-opened" });
+};
+
+/** See {@link onEntityContainerOpened}. */
+const onEntityContainerClosed = (vigenersl: EntityContainerClosedAfterEvent): void => {
+    const { entity, closeSource } = vigenersl;
+    if (isSweptElsewhere(entity)) return;
+    sweepAccessed({ container: entityContainerOf(entity), place: entity?.isValid ? entity : undefined, source: closeSource, reason: "entity-container-closed" });
+};
+
+/** A copy that escaped cannot be used. */
+const onItemUse = (vigenersl: ItemUseBeforeEvent): void => {
+    const { itemStack } = vigenersl;
+    refuseMarked({ event: vigenersl, stack: itemStack, reason: "use-refused" });
+};
+
+/** A copy cannot be used on a block. The engine repeats the event while the button is held: only the first is reported. */
+const onInteractWithBlock = (vigenersl: PlayerInteractWithBlockBeforeEvent): void => {
+    const { itemStack, isFirstEvent } = vigenersl;
+    refuseMarked({ event: vigenersl, stack: itemStack, reason: "interact-refused", isReported: isFirstEvent !== false });
+};
+
+/** A copy cannot be used on an entity. */
+const onInteractWithEntity = (vigenersl: PlayerInteractWithEntityBeforeEvent): void => {
+    const { itemStack } = vigenersl;
+    refuseMarked({ event: vigenersl, stack: itemStack, reason: "entity-interact-refused" });
 };
 
 /**
@@ -345,115 +400,13 @@ export const getItemGuardStats = (): ItemGuardStats => {
 };
 
 /**
- * Removes rendered items from a player's inventory, worn slots and off hand.
- *
- * @param player The player to sweep.
- * @param onRemoved Called with each removed item.
- * @returns How many stacks were removed.
+ * Subscribes the guard to the world, and sweeps every player in it on the next tick: at startup the
+ * world has not loaded yet. Idempotent; `installBedrockRuntime` and every surface call it.
  */
-export const scrubInventoryOf = (player: Player, onRemoved?: (probe: SlotProbe) => void): number => {
-    return scrubContainerOf(player, onRemoved) + scrubEquipmentOf(player, onRemoved);
-};
-
-/** A thrown item: the only event that names the thrower. */
-const onItemDropped = (vigenersl: EntityItemDropAfterEvent): void => {
-    const { entity, items } = vigenersl;
-    const ownerId = entity?.id;
-    const dropped = droppedEntitiesOf(items);
-    if (dropped.length === 0) {
-        report(`reason=drop items-unreadable owner=${ownerId ?? "unknown"}`);
-        return;
-    }
-    dropped.forEach((item) => {
-        if (!destroyIfRendered(item, "drop", ownerId)) cleanThrownStorage(item, ownerId);
-    });
-};
-
-/**
- * Replaces a thrown storage item that holds rendered copies with a clean one. A loose item's stack
- * cannot be written, so a clean copy is spawned in its place before the old one goes: a failed spawn
- * leaves the player's storage item where it was.
- */
-const cleanThrownStorage = (candidate: Entity, ownerId?: string): void => {
-    if (candidate.typeId !== ITEM_ENTITY_TYPE_ID || !candidate.isValid) return;
-    const stack = stackOf(candidate);
-    if (!stack || isRenderedItem(stack)) return;
-    const probes: SlotProbe[] = [];
-    const removed = scrubStorageItem(stack, (probe) => probes.push(probe));
-    if (removed === 0) return;
-    try {
-        candidate.dimension.spawnItem(stack, candidate.location);
-        candidate.remove();
-    } catch (error) {
-        report(`reason=drop storage-respawn-failed item=${stack.typeId} error=${String(error)}`);
-        return;
-    }
-    report(`reason=drop item=${stack.typeId} swept=${removed}`);
-    probes.forEach((probe) => announce(probe, ownerId));
-};
-
-/** A loose item spawned during play. One loaded with its chunk goes through `onEntityLoaded` instead. */
-const onEntitySpawned = (vigenersl: EntitySpawnAfterEvent): void => {
-    destroyIfRendered(vigenersl.entity, "spawn");
-};
-
-/**
- * A loose item in a chunk that has just loaded: a copy lying on the ground when the world last
- * saved is not a spawn, so `entitySpawn` never saw it.
- */
-const onEntityLoaded = (vigenersl: EntityLoadAfterEvent): void => {
-    destroyIfRendered(vigenersl.entity, "load");
-};
-
-/** A player who logged out holding a copy. */
-const onPlayerJoined = (vigenersl: PlayerSpawnAfterEvent): void => {
-    const { player, initialSpawn } = vigenersl;
-    if (!initialSpawn) return;
-    const removed = scrubInventoryOf(player);
-    if (removed > 0) report(`reason=join player=${player.name} swept=${removed}`);
-};
-
-/**
- * A chest, furnace or hopper: its contents and whoever opened it are swept. On open, because a
- * hopper can have filled it unopened; on close, for a copy put in while it was open.
- */
-const onBlockContainerOpened = (vigenersl: BlockContainerOpenedAfterEvent): void => {
-    const { block, openSource } = vigenersl;
-    sweepAccessed({ container: blockContainerOf(block), source: openSource, reason: "container-opened" });
-};
-
-const onBlockContainerClosed = (vigenersl: BlockContainerClosedAfterEvent): void => {
-    const { block, closeSource } = vigenersl;
-    sweepAccessed({ container: blockContainerOf(block), source: closeSource, reason: "container-closed" });
-};
-
-/** The container of a valid entity, or `null`. */
-const entityContainerOf = (entity: Entity | undefined): Container | null => {
-    return entity?.isValid ? inventoryContainerOf(entity) : null;
-};
-
-/**
- * A chest minecart, a donkey, a llama, a block's storage entity: swept on open and on close. A menu
- * entity is skipped by type, whichever pack spawned it: its slots are the menu's copies, and its
- * viewer's inventory is the menu's own business.
- */
-const onEntityContainerOpened = (vigenersl: EntityContainerOpenedAfterEvent): void => {
-    const { entity, openSource } = vigenersl;
-    if (entity?.typeId === SURFACE_ENTITY_TYPE_ID) return;
-    sweepAccessed({ container: entityContainerOf(entity), source: openSource, reason: "entity-container-opened" });
-};
-
-/** See {@link onEntityContainerOpened}; a menu entity is skipped the same way. */
-const onEntityContainerClosed = (vigenersl: EntityContainerClosedAfterEvent): void => {
-    const { entity, closeSource } = vigenersl;
-    if (entity?.typeId === SURFACE_ENTITY_TYPE_ID) return;
-    sweepAccessed({ container: entityContainerOf(entity), source: closeSource, reason: "entity-container-closed" });
-};
-
-/** Subscribes the guard to the world. Idempotent; every surface calls it on construction. */
 export const installItemGuard = (): void => {
     if (isInstalled) return;
     isInstalled = true;
+    setLostItemReporter(report);
     onUninstall(() => {
         isInstalled = false;
         stats.inspected = 0;
@@ -469,22 +422,10 @@ export const installItemGuard = (): void => {
     subscribeGuarded({ signal: world.afterEvents.blockContainerClosed, label: "blockContainerClosed", handler: onBlockContainerClosed });
     subscribeGuarded({ signal: world.afterEvents.entityContainerOpened, label: "entityContainerOpened", handler: onEntityContainerOpened });
     subscribeGuarded({ signal: world.afterEvents.entityContainerClosed, label: "entityContainerClosed", handler: onEntityContainerClosed });
+    subscribeGuarded({ signal: world.beforeEvents.itemUse, label: "itemUse", handler: onItemUse });
+    subscribeGuarded({ signal: world.beforeEvents.playerInteractWithBlock, label: "playerInteractWithBlock", handler: onInteractWithBlock });
+    subscribeGuarded({ signal: world.beforeEvents.playerInteractWithEntity, label: "playerInteractWithEntity", handler: onInteractWithEntity });
 
-    // A copy that escaped still cannot be used, or used on a block or an entity.
-    subscribeGuarded({
-        signal: world.beforeEvents.itemUse,
-        label: "itemUse",
-        handler: (vigenersl) => refuseMarked({ event: vigenersl, stack: vigenersl.itemStack, reason: "use-refused" }),
-    });
-    subscribeGuarded({
-        signal: world.beforeEvents.playerInteractWithBlock,
-        label: "playerInteractWithBlock",
-        handler: (vigenersl) =>
-            refuseMarked({ event: vigenersl, stack: vigenersl.itemStack, reason: "interact-refused", isReported: vigenersl.isFirstEvent !== false }),
-    });
-    subscribeGuarded({
-        signal: world.beforeEvents.playerInteractWithEntity,
-        label: "playerInteractWithEntity",
-        handler: (vigenersl) => refuseMarked({ event: vigenersl, stack: vigenersl.itemStack, reason: "entity-interact-refused" }),
-    });
+    // Subscribing is allowed before the world loads and in a read-only window; sweeping is not.
+    system.run(sweepOnlinePlayers);
 };

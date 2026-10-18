@@ -78,7 +78,8 @@ handler on the same pass.
 
 **A menu item stayed in my inventory.** It is removed within half a second while the menu is open, and
 again several times on close. If one survives, it carries the marker and is removed when thrown, used,
-or when the player opens any container or rejoins. Report a reproducible case.
+or when the player opens any container or rejoins. After a restart, call `installBedrockRuntime()` at
+startup, or nothing sweeps until the first menu opens. Report a reproducible case.
 
 **A plain stackable item shows an empty line in its tooltip.** Stackable items cannot keep dynamic
 properties, so the anti-duplication marker falls back to an invisible lore line, which takes a row

@@ -131,12 +131,14 @@ const onEntityContainerOpened = (vigenersl: EntityContainerOpenedAfterEvent): vo
 };
 
 const onEntityContainerClosed = (vigenersl: EntityContainerClosedAfterEvent): void => {
-    recordAccess({ entity: vigenersl.entity, viewer: vigenersl.closeSource?.entity, isOpen: false });
+    const { entity, closeSource } = vigenersl;
+    recordAccess({ entity, viewer: closeSource?.entity, isOpen: false });
 };
 
 const onPlayerLeft = (vigenersl: PlayerLeaveAfterEvent): void => {
-    forgetNativeViewer(vigenersl.playerId);
-    menuTickByPlayerId.delete(vigenersl.playerId);
+    const { playerId } = vigenersl;
+    forgetNativeViewer(playerId);
+    menuTickByPlayerId.delete(playerId);
 };
 
 /** Starts handling clicks and native opens. Idempotent; called by `registerBlockContainer`. */
@@ -149,7 +151,7 @@ export const installStorageAccess = (): void => {
     });
 
     subscribeUntilUninstall(world.beforeEvents.playerInteractWithEntity, onStorageClicked);
-    if (world.afterEvents.entityContainerOpened) subscribeUntilUninstall(world.afterEvents.entityContainerOpened, onEntityContainerOpened);
+    subscribeUntilUninstall(world.afterEvents.entityContainerOpened, onEntityContainerOpened);
     subscribeUntilUninstall(world.afterEvents.entityContainerClosed, onEntityContainerClosed);
     subscribeUntilUninstall(world.afterEvents.playerLeave, onPlayerLeft);
 };

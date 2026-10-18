@@ -40,9 +40,9 @@ unkeyed component of that type under its parent. `Anonymous` stands for an unnam
 | `runtime` | `warn` | `Uncaught error in an effect, render or cleanup: …`; `No scheduler installed; falling back to microtask scheduling…` |
 | `scheduler` | `error` | `A reactive task ran 100 times without the queue settling and was abandoned…`; `A flush ran 10000 tasks and abandoned the rest…` |
 | `diagnostic` | `error` / `warn` | `<kind>: <message>` for menus without `onDiagnostic`. Failures (`render-error`, `handler-error`, `write-failed`, `platform-error`) are errors. |
-| `surface` | `warn` | Platform failures of a `BedrockSurface` created without `onError`. |
+| `surface` | `info` / `warn` | Platform failures of a `BedrockSurface` created without `onError`, as warnings; `orphan-surface-removed entityId=… viewer=… returned=N` (`info`, a menu entity a restart left, emptied and removed, its real items back with the viewer) and `orphan-surface-remove-failed error=…` (`warn`). |
 | `block` | `info` / `warn` | [Block container records](#block-container-records), one line each. |
-| `storage` | `info` | `player-inventory invalidated player=… playerId=…` |
+| `storage` | `info` / `warn` | `player-inventory invalidated player=… playerId=…` and `player-ender invalidated player=… playerId=…`; for [storages opened by click](../guides/held-storage.md#events), at `info`: `held-storage-discarded entityId=…` (a copy a restart left, thrown away) and `held-storage-resumed kind=… entityId=… refused=N` (a screen written on its player's return); as warnings: `held-write-failed kind=… error=…`, `held-release-failed kind=… error=…`, `held-resume-failed kind=… error=…` (or `player=… error=a kept screen never loaded`), `held-pending-failed kind=… error=…` (or `player=…`), `held-key-failed kind=… error=…` (a source's `key()` threw: its screen is not kept), `held-source-failed error=…` and `held-storage-discard-failed error=…`. |
 | `item-guard` | `info` | [Guard lines](#item-guard-lines). |
 | `items` | `warn` | What an item cannot take, once per item type or combination: an enchantment, durability, tags, a potion effect or delivery, block states, or a loot table that is missing or produced nothing. |
 
@@ -98,6 +98,7 @@ format may change between versions.
 | `insert-stranded slot=N item=… reason=return-failed` | A returned item could not be placed anywhere and was left in the slot. |
 | `insert-copy-restored slot=N item=…` | A menu copy was put into a button or decorative slot; the slot was repainted instead of handing the copy back. |
 | `lookalike-found slot=N item=…` | A player's stack that reads exactly like a button (same type, count and name) was found swapped onto it; it is handled as an insertion. |
+| `click-open-timeout ticks=N` | A menu opened with `openBy: "click"` was never clicked and closed. |
 | `close-deferred reason=restricted-execution` | The menu was closed from a `beforeEvents` handler, where the world is read-only; the hand-back and removal run on the next tick. |
 | `input-copy-removed slot=N item=… reason=no-pending-take` | A menu copy dragged into an input was removed. |
 | `stack-grew slot=N item=… by=N` | A button's stack grew: another menu copy was stacked onto it. The extra is taken back. |
@@ -135,6 +136,12 @@ With `setItemGuardLogger`, or at `info` level with source `item-guard`:
 | `reason=entity-interact-refused item=…` | Using a menu copy on an entity was cancelled. |
 | `reason=load item=… destroyed=N` | A menu copy that loaded as a loose item was destroyed. |
 | `reason=join player=… swept=N` | Copies removed from a joining player. |
+| `reason=install player=… swept=N` | Copies removed from a player already in the world when the guard was installed, such as after a script reload. |
+| `reason=install sweep-failed error=…` | That sweep failed. |
+| `reason=drop item=… swept=N` | Copies removed from inside a thrown storage item, such as a bundle, which was replaced by a clean one. |
+| `reason=drop storage-respawn-failed item=… error=…` | The clean one could not be spawned; the thrown one stays as it was. |
+| `reason=drop storage-removal-failed item=… error=…` | The thrown one could not be removed; the clean one was taken back. |
+| `reason=sweep own-item-lost item=… amount=N` | One of the player's own items, taken out with a copy, could neither go back nor be dropped. |
 | `reason=container-opened swept=N` | Copies removed from a player opening a block container. |
 | `reason=container-closed swept=N` | Copies removed from a player closing a block container. |
 | `reason=entity-container-opened swept=N` | Copies removed from a player opening an entity's container. |

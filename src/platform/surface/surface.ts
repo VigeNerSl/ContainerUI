@@ -1,6 +1,6 @@
 /** The Bedrock surface: an invisible rideable entity whose inventory the viewer sees as a chest. */
 
-import { system, world, type Container, type Entity, type Player, type EntityRideableComponent } from "@minecraft/server";
+import { system, world, type Container, type Entity, type Player } from "@minecraft/server";
 import type { CloseReason, Dispose, HostAdapter, HostInteraction, ItemView } from "../../core/index.js";
 import { log } from "../../core/logging/logger.js";
 import { canWriteWorld, returnStrandedItems, settleUnscannedInputs } from "./closeSettlement.js";
@@ -8,7 +8,6 @@ import { Revocations } from "../scan/conflictRevocations.js";
 import {
     IDLE_SCAN_INTERVAL_TICKS,
     MAX_VIEW_DISTANCE,
-    RIDEABLE_COMPONENT_ID,
     SCAN_INTERVAL_TICKS,
     SURFACE_ENTITY_TYPE_ID,
     SUPPORTED_SIZES,
@@ -19,9 +18,11 @@ import {
 import { fromItemStack, toItemStack } from "../items/itemConversion.js";
 import { installItemGuard, onMarkedItemDestroyed } from "../items/itemGuard.js";
 import { classifySpawnError, type SpawnOutcome } from "./mountSequence.js";
+import { OpenMode, isBeyondReach } from "./openMode.js";
 import { ExpectedSlots } from "../scan/scanPass.js";
 import { SurfaceScanner, type ScanPhases, type ScanStats } from "./surfaceScanner.js";
-import { installContainerClosedHook, surfaceByPlayerId, surfacesByEntityId } from "./surfaceRegistry.js";
+import { installSurfaceHooks, surfaceByPlayerId, surfacesByEntityId } from "./surfaceRegistry.js";
+import { recordMirroredSlots } from "./surfaceOrphans.js";
 import { ViewerInventory } from "../scan/viewerInventory.js";
 import { WrittenSlots } from "./writtenSlots.js";
 import type { BedrockSurfaceOptions } from "./surfaceOptions.js";
@@ -38,12 +39,15 @@ export class BedrockSurface implements HostAdapter {
 
     readonly #viewer: ViewerInventory;
     readonly #revocations: Revocations;
+    /** The entity and its container, resolved by id again whenever the tick changes: neither is used in a later tick. */
     #entity: Entity | null = null;
+    #entityTick = -1;
+    #containerOf: { tick: number; container: Container | null } = { tick: -1, container: null };
     #entityId: string | null = null;
     readonly #title: string;
+    readonly #openMode: OpenMode;
     readonly #maxViewDistance: number;
-    readonly #hintMessage: string | undefined;
-    readonly #onError: ((message: string) => void) | undefined;
+    readonly #onError: (message: string) => void;
     readonly #onTrace: ((message: string) => void) | undefined;
 
     readonly #expected: ExpectedSlots;
@@ -63,7 +67,7 @@ export class BedrockSurface implements HostAdapter {
     /**
      * @param player The viewer.
      * @param options Surface options.
-     * @throws {RangeError} For an unsupported size.
+     * @throws {RangeError} For an unsupported size, or click options `OpenMode` refuses.
      */
     constructor(player: Player, options: BedrockSurfaceOptions) {
         if (!SUPPORTED_SIZES.includes(options.size)) {
@@ -75,8 +79,15 @@ export class BedrockSurface implements HostAdapter {
         this.slotCount = options.size;
         this.#title = options.title ?? "Container";
         this.#maxViewDistance = options.maxViewDistance ?? MAX_VIEW_DISTANCE;
-        this.#hintMessage = options.hintMessage;
-        this.#onError = options.onError;
+        this.#openMode = new OpenMode({
+            options,
+            viewerLocation: player.location,
+            maxViewDistance: this.#maxViewDistance,
+            player: () => this.player,
+            entity: () => this.entity,
+            reportError: (message) => this.#reportError(message),
+        });
+        this.#onError = options.onError ?? ((message) => log({ level: "warn", source: "surface", message }));
         this.#onTrace = options.onTrace;
 
         this.#viewer = new ViewerInventory(player, {
@@ -110,15 +121,8 @@ export class BedrockSurface implements HostAdapter {
             },
         );
 
-        installContainerClosedHook();
+        installSurfaceHooks();
         installItemGuard();
-        this.#unsubscribeGuard = onMarkedItemDestroyed((probe, ownerId) => {
-            if (this.#isClosed) return false;
-            // Another player's throw is not this surface's take.
-            if (ownerId !== undefined && ownerId !== this.#viewer.playerId) return false;
-            // Only a copy thrown by this viewer is worth holding for a take the scan has not seen yet.
-            return this.#scanner.resolveFromGround(probe, { shouldHold: ownerId !== undefined });
-        });
     }
 
     /** Whether the surface has closed. */
@@ -133,9 +137,10 @@ export class BedrockSurface implements HostAdapter {
 
     /** The surface entity, or `null` once it is gone. */
     get entity(): Entity | null {
-        if (this.#entity?.isValid) return this.#entity;
-        if (!this.#entityId) return null;
-        this.#entity = world.getEntity(this.#entityId) ?? null;
+        if (this.#entityTick !== system.currentTick || !this.#entity?.isValid) {
+            this.#entity = this.#entityId ? (world.getEntity(this.#entityId) ?? null) : null;
+            this.#entityTick = system.currentTick;
+        }
         return this.#entity;
     }
 
@@ -155,16 +160,22 @@ export class BedrockSurface implements HostAdapter {
         }
 
         try {
-            const entity = player.dimension.spawnEntity(SURFACE_ENTITY_TYPE_ID, {
-                x: player.location.x,
-                y: player.location.y,
-                z: player.location.z,
-            });
+            const entity = player.dimension.spawnEntity(SURFACE_ENTITY_TYPE_ID, this.#openMode.spawnLocationFor(player));
 
             this.#entity = entity;
+            this.#entityTick = system.currentTick;
+            this.#containerOf = { tick: -1, container: null };
             this.#entityId = entity.id;
             surfacesByEntityId.set(entity.id, this);
             surfaceByPlayerId.set(this.#viewer.playerId, this);
+            // Subscribed once the entity exists, so a surface whose open failed holds no listener.
+            this.#unsubscribeGuard ??= onMarkedItemDestroyed((probe, ownerId) => {
+                if (this.#isClosed) return false;
+                // Another player's throw is not this surface's take; only the viewer's own is held for the scan.
+                if (ownerId !== undefined && ownerId !== this.#viewer.playerId) return false;
+                return this.#scanner.resolveFromGround(probe, { shouldHold: ownerId !== undefined });
+            });
+            this.#openMode.prepare(entity, this.#viewer.playerId);
 
             entity.nameTag = surfaceNameTag(this.slotCount, this.#title);
             entity.triggerEvent(openEventFor(this.slotCount));
@@ -184,44 +195,19 @@ export class BedrockSurface implements HostAdapter {
     }
 
     /**
-     * Mounts the viewer and starts scanning. Call once the inventory is ready and rendered.
+     * Seats the viewer (unless the surface opens by click) and starts scanning. Call once the
+     * inventory is ready and rendered.
      *
-     * @returns Whether the viewer was mounted.
+     * @returns Whether the surface went live.
      */
     activate(): boolean {
-        const entity = this.entity;
-        const player = this.player;
-        if (!entity || !player) return false;
-
-        const container = this.#container();
-        if (!container || container.size !== this.slotCount) {
+        if (!this.entity || !this.player) return false;
+        if (!this.isInventoryReady()) {
             this.#reportError(`Surface inventory is not ready (expected ${this.slotCount} slots).`);
             return false;
         }
 
-        try {
-            const rideable = entity.getComponent(RIDEABLE_COMPONENT_ID) as EntityRideableComponent | undefined;
-            if (!rideable) {
-                this.#reportError("Surface entity has no rideable component.");
-                return false;
-            }
-            if (!rideable.addRider(player)) {
-                this.#reportError("The viewer could not be seated on the surface entity.");
-                return false;
-            }
-
-            if (this.#hintMessage) {
-                try {
-                    player.onScreenDisplay.setActionBar(this.#hintMessage);
-                } catch (error) {
-                    this.#reportError(`Failed to show the hint: ${String(error)}`);
-                }
-            }
-        } catch (error) {
-            this.#reportError(`Failed to mount the player: ${String(error)}`);
-            return false;
-        }
-
+        if (!this.#openMode.letIn()) return false;
         this.#scanner.start();
         this.#watchdogRunId = system.runInterval(() => this.#checkLiveness(), WATCHDOG_INTERVAL_TICKS);
         return true;
@@ -339,15 +325,26 @@ export class BedrockSurface implements HostAdapter {
         this.close("player");
     }
 
+    /** @internal Called by the global container-opened hook. */
+    notifyPlayerOpened(): void {
+        this.#openMode.markOpened();
+    }
+
+    /**
+     * @internal Whether a click by `playerId` may open the screen: only the viewer's, and only once
+     * the menu is written and scanned, or the screen would open on slots nobody watches.
+     */
+    acceptsClickFrom(playerId: string): boolean {
+        // A click after the wait ran out is refused: the watchdog closes the menu within a few ticks.
+        return !this.#isClosed && this.#openMode.isLive && this.#openMode.overdueTicks === undefined && this.#viewer.playerId === playerId;
+    }
+
     /**
      * Scan cost and activity. `detectionMs` sums one 1 ms-quantised sample per pass, so it
      * overstates passes under a millisecond; use {@link measureScanCost} for those.
      */
     get scanStats(): ScanStats & { scrubbedStacks: number } {
-        return {
-            ...this.#scanner.stats,
-            scrubbedStacks: this.#viewer.scrubbedStacks,
-        };
+        return { ...this.#scanner.stats, scrubbedStacks: this.#viewer.scrubbedStacks };
     }
 
     /**
@@ -374,13 +371,17 @@ export class BedrockSurface implements HostAdapter {
 
     /** @internal See `HostAdapter.setPlayerWritableSlots`. */
     setPlayerWritableSlots(indices: ReadonlySet<number>, mirrored: ReadonlySet<number> = new Set()): void {
+        // Recorded on the entity only when it changes: a commit runs as often as every tick.
+        const isChanged = mirrored.size !== this.#mirrored.size || [...mirrored].some((index) => !this.#mirrored.has(index));
         this.#playerWritable = indices;
         this.#mirrored = mirrored;
+        if (isChanged) recordMirroredSlots(this.entity, mirrored);
     }
 
     /** Stops the scan, the watchdog and the guard subscription, and leaves the registry. */
     #stopWatching(): void {
         this.#scanner.stop();
+        this.#openMode.dispose();
         if (this.#watchdogRunId !== null) system.clearRun(this.#watchdogRunId);
         this.#watchdogRunId = null;
 
@@ -447,9 +448,11 @@ export class BedrockSurface implements HostAdapter {
         this.scrubPlayerInventory();
     }
 
+    /** The entity's container, read once a tick. */
     #container(): Container | null {
         const entity = this.entity;
-        return entity ? inventoryContainerOf(entity) : null;
+        if (this.#containerOf.tick !== this.#entityTick) this.#containerOf = { tick: this.#entityTick, container: entity ? inventoryContainerOf(entity) : null };
+        return this.#containerOf.container?.isValid === false ? null : this.#containerOf.container;
     }
 
     #emitInteraction(interaction: HostInteraction): void {
@@ -465,17 +468,20 @@ export class BedrockSurface implements HostAdapter {
     #checkLiveness(): void {
         if (this.#isClosed) return;
 
+        const overdueTicks = this.#openMode.overdueTicks;
+        if (overdueTicks !== undefined) {
+            this.#trace(`click-open-timeout ticks=${overdueTicks}`);
+            this.close("timeout");
+            return;
+        }
+
         const entity = this.entity;
         const player = this.player;
         if (!entity?.isValid || !player?.isValid) {
             this.close("invalidated");
             return;
         }
-
-        const dx = player.location.x - entity.location.x;
-        const dy = player.location.y - entity.location.y;
-        const dz = player.location.z - entity.location.z;
-        if (dx * dx + dy * dy + dz * dz > this.#maxViewDistance * this.#maxViewDistance) {
+        if (isBeyondReach({ player, entity, maxDistance: this.#maxViewDistance })) {
             this.close("distance");
             return;
         }
@@ -489,10 +495,6 @@ export class BedrockSurface implements HostAdapter {
     }
 
     #reportError(message: string): void {
-        if (this.#onError) {
-            this.#onError(message);
-            return;
-        }
-        log({ level: "warn", source: "surface", message });
+        this.#onError(message);
     }
 }

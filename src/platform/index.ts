@@ -9,6 +9,7 @@ export { openContainer, installBedrockRuntime, type ContainerSession, type OpenC
 export { ContainerFormData, type ContainerFormOpenOptions } from "./surface/openForm.js";
 export { runMountSequence, classifySpawnError, type MountEvent, type MountSequenceOptions, type SpawnOutcome } from "./surface/mountSequence.js";
 export { BedrockSurface, type BedrockSurfaceOptions } from "./surface/surface.js";
+export type { SurfaceClickPoint, SurfaceOpenMode } from "./surface/surfaceOptions.js";
 export { fromItemStack, toItemStack, toStorageStack, isRenderedItem, maxStackOf } from "./items/itemConversion.js";
 export {
     installItemGuard,
@@ -40,11 +41,24 @@ export {
 } from "./block/blockContainer.js";
 export { installBlockSneak } from "./block/blockSneak.js";
 export { createWorldBackend, createEntityBackend } from "./world/persistence.js";
-export { readShulkerContents, sweepShulkerLeftovers, type ShulkerReadEvent, type ShulkerReadOptions } from "./items/shulkerReader.js";
+export {
+    readShulkerContents,
+    writeShulkerContents,
+    sweepShulkerLeftovers,
+    type ShulkerReadEvent,
+    type ShulkerReadOptions,
+    type ShulkerWriteResult,
+} from "./items/shulkerReader.js";
+export { installHeldItem, openHeldStorage, type HeldStorageOptions } from "./items/heldHooks.js";
+export { registerHeldSource, type HeldKind, type HeldRelease, type HeldResume } from "./items/heldRecovery.js";
+export type { HeldItemOptions } from "./items/heldItems.js";
+export { shulkerBoxSource, enderChestSource } from "./items/heldSources.js";
+export type { HeldOpenEvent, HeldOpenOptions, HeldReport, HeldSource, HeldWriteResult } from "./items/heldStorage.js";
 export { itemFromLootTable, type LootItemOptions } from "./items/lootItems.js";
 export { PlayerInventoryStorage, PLAYER_INVENTORY_WATCH_INTERVAL_TICKS } from "./storage/playerStorage.js";
+export { PlayerEnderStorage } from "./storage/enderStorage.js";
 export { EntityInventoryStorage } from "./storage/entityInventoryStorage.js";
-export { inventoryContainerOf } from "./storage/inventoryContainer.js";
+export { inventoryContainerOf, enderContainerOf } from "./storage/inventoryContainer.js";
 export { createContainerWatcher, type ContainerWatcher } from "./storage/containerWatch.js";
 export {
     useScore,
@@ -64,6 +78,7 @@ export {
     LEGACY_UI_ITEM_MARKER,
     ITEM_ENTITY_TYPE_ID,
     MAX_VIEW_DISTANCE,
+    CLICK_OPEN_WAIT_TICKS,
     MOUNT_MAX_WAIT_TICKS,
     MOUNT_MAX_SPAWN_ATTEMPTS,
     SCAN_INTERVAL_TICKS,

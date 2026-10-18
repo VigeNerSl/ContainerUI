@@ -8,7 +8,7 @@ import { interactionKindOf } from "../scan/slotMatching.js";
 import type { BlockContainerOptions, BlockContainerRenderContext } from "./blockContainer.js";
 import { describeItem, type BlockContainerEvent } from "./blockEvents.js";
 import { claimBlockStorageEntity } from "./blockRegistry.js";
-import { closeSessions, registerSession, unregisterSession } from "./blockSessions.js";
+import { closeSessions, hasOpenSessions, registerSession, unregisterSession } from "./blockSessions.js";
 import { BlockStorage } from "./blockStorage.js";
 import { recordBlockType } from "./storageRemoval.js";
 
@@ -97,6 +97,8 @@ const settleClosedMenu = ({
     const stats = storage.watchStats;
     emit({ kind: "inventory", component: componentName, blockKey, detail: `at=close entityId=${storage.entityId} items=${storage.inventorySummary()}` });
     emit({ kind: "closed", component: componentName, blockKey, player: player.name, detail: `watchPasses=${stats.passes} watchMs=${stats.totalMs}` });
+    // Nobody has it open any more: its cached slots and handles need not be kept until the block goes.
+    if (!hasOpenSessions(storage.entityId)) BlockStorage.evict(storage.entityId);
 };
 
 export const openBlockContainer = (request: MenuRequest, storage: BlockStorage): void => {

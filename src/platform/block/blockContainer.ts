@@ -53,7 +53,7 @@ export interface BlockContainerOptions {
     dropOnBreak?: boolean | undefined;
     /** Menus only: ticks between checks for changes made outside the menu, or `null` to disable. Defaults to 10. */
     watchIntervalTicks?: number | null | undefined;
-    /** Menus only: action-bar hint shown on open. */
+    /** Menus only: action-bar hint shown once the player is seated, before they open the screen. */
     hintMessage?: string | undefined;
     /** Menus only: ticks between interaction scans. */
     scanIntervalTicks?: number | undefined;
@@ -61,7 +61,11 @@ export interface BlockContainerOptions {
     onDiagnostic?: ((diagnostic: Diagnostic) => void) | undefined;
     /** Menus only: receives interaction-tracking records. */
     onTrace?: ((message: string) => void) | undefined;
-    /** Receives this component's lifecycle records. Other records go to {@link setBlockContainerLogger}. */
+    /**
+     * Receives this component's open, close and contents records, from menus and native opens alike.
+     * Records of the storage entity itself (sneak hiding, restores, hits, failed writes) go to
+     * {@link setBlockContainerLogger}.
+     */
     onEvent?: ((event: BlockContainerEvent) => void) | undefined;
 }
 

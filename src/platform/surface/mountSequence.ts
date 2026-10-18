@@ -52,7 +52,7 @@ export const runMountSequence = (options: MountSequenceOptions): void => {
 
         if (options.isInventoryReady()) {
             options.report({ kind: "inventory-ready", ticksWaited });
-            // Rendered before mounting, so the screen opens full.
+            // Rendered before mounting, so the screen is full whenever the player opens it.
             if (options.activate()) options.report({ kind: "mounted", ticksWaited });
             else options.report({ kind: "activation-failed", ticksWaited });
             return;

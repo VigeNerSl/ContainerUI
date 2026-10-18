@@ -54,7 +54,7 @@ Requirements:
 
 ### 1. Install the packs
 
-The packs hold the menu entity, the block storage entity, the screen layouts and the 17 flat glass
+The packs hold the menu entity, the block storage entity, the entity behind storages opened by click, the screen layouts and the 17 flat glass
 blocks, and contain no scripts. The resource pack also shows hover text on touch in every container
 screen of the world, vanilla ones included. Get the package and copy them into your game:
 
@@ -133,9 +133,12 @@ builds a counter and a small shop step by step.
   [Async data](documentation/guides/async-data.md)
 - **Shops and lists.** Pagination and a quantity picker.
   [Lists and quantities](documentation/guides/lists-and-quantities.md)
-- **Real storage.** Chests and custom machine blocks, player inventories, a shulker reader, saved data.
-  [Block containers](documentation/guides/block-containers.md),
+- **Real storage.** Chests and custom machine blocks, player inventories and ender chests, a shulker
+  reader and writer, saved data. [Block containers](documentation/guides/block-containers.md),
   [Storage](documentation/guides/storage-and-mirroring.md), [Persistence](documentation/guides/persistence.md)
+- **Storages opened by click.** A shulker box in hand, an ender chest or your add-on's backpack, shown
+  as the game's own chest and written through as the player changes it.
+  [Storages opened by click](documentation/guides/held-storage.md)
 - **Real items.** Enchantments, durability, potions, block states and invisible tags.
 - **Flat glass.** Seventeen seamless glass tiles for borders and backdrops.
   [Flat glass](documentation/guides/flat-glass.md)
@@ -156,7 +159,7 @@ builds a counter and a small shop step by step.
 
 ## Status
 
-`1.0.0-beta.3` is the current release; the first public one was `1.0.0-beta.1`. Menus, block containers,
+`1.0.0-beta.4` is the current release; the first public one was `1.0.0-beta.1`. Menus, block containers,
 modals, loading states, pages and quantities have been run in a live world on a computer and on a phone,
 and the core and the interaction logic are covered by automated checks. It is a beta: the API may still
 change before 1.0, and every breaking change will be listed in the changelog.

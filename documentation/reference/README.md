@@ -202,9 +202,11 @@ Types: `InputOptions`, `Area`, `StorageOptions`, `ContainerFormOpenOptions`.
 | `EntityInventoryStorage` | abstract class | Base for entity storages. [→](../guides/storage-and-mirroring.md#entity-storages) |
 | `BlockStorage` | `BlockStorage.forEntity(entity)`, `BlockStorage.evict(entityId)` | A block's storage entity. |
 | `PlayerInventoryStorage` | `PlayerInventoryStorage.forPlayer(player)`, `.evict(playerId)` | A player's inventory. [→](../guides/storage-and-mirroring.md#a-players-inventory) |
+| `PlayerEnderStorage` | `PlayerEnderStorage.forPlayer(player)`, `.evict(playerId)` | A player's ender chest. [→](../guides/storage-and-mirroring.md#a-players-ender-chest) |
 | `PLAYER_INVENTORY_WATCH_INTERVAL_TICKS` | `2` | Default player-inventory watch interval. |
 | `createContainerWatcher` | `({ resolveContainer, onExternalChange, onInvalid }) => ContainerWatcher` | Watches a container for outside changes. [→](../guides/storage-and-mirroring.md#watching-a-container-yourself) |
 | `inventoryContainerOf` | `(entity: Entity) => Container \| null` | An entity's inventory. |
+| `enderContainerOf` | `(entity: Entity) => Container \| null` | A player's ender chest. |
 
 Types: `SlotStorage` (`size`, `get`, `set`, `version`), `MemoryStorage` (adds `silentSet`,
 `notifyExternalChange`, `snapshot`), `ContainerWatcher`.
@@ -233,7 +235,7 @@ Types: `KeyValueBackend`, `MemoryBackend`, `BackendWrite`, `ChunkedStoreOptions`
 | `cloneItemView` **core** | `(item) => ItemView \| null` | Deep copy. |
 | `toDisplayView` **core** | `(item) => ItemView \| null` | Copy without `native`. |
 | `fromItemStack` | `(stack: ItemStack \| undefined) => ItemView \| null` | Bedrock. [→](../guides/items.md#bedrock-conversions) |
-| `toItemStack` | `(view, { isUiOwned? }) => ItemStack \| undefined` | A marked stack. |
+| `toItemStack` | `(view, { isUiOwned? }) => ItemStack \| undefined` | A described item, marked; a real item, cloned and marked only in a UI-owned slot. |
 | `toStorageStack` | `(view) => ItemStack \| undefined` | An unmarked stack. |
 | `isRenderedItem` | `(stack) => boolean` | Whether a stack is marked. |
 | `maxStackOf` | `(typeId) => number \| undefined` | Stack size of an item type. |
@@ -243,10 +245,24 @@ Types: `KeyValueBackend`, `MemoryBackend`, `BackendWrite`, `ChunkedStoreOptions`
 | `onMarkedItemDestroyed` | `(listener: MarkedItemListener) => () => void` | |
 | `itemFromLootTable` | `(path, options?: LootItemOptions) => ItemView \| null` | An item a loot table builds, such as a tipped arrow. [→](../guides/items.md#items-only-a-loot-table-can-build) |
 | `readShulkerContents` | `(player, shulkerStack, options?) => Promise<(ItemView \| null)[]>` | Never throws; failures arrive through `onEvent`. [→](../guides/shulker-reader.md) |
+| `writeShulkerContents` | `({ player, shulkerStack, contents, onEvent? }) => ShulkerWriteResult \| null` | A shulker box item holding `contents`, made in one tick. [→](../guides/shulker-reader.md#writing-a-shulker-box) |
 | `sweepShulkerLeftovers` | `() => number` | Removes what a cut-short read left behind and returns how many blocks it removed. [→](../guides/shulker-reader.md#a-read-cut-short) |
 
 Types: `ItemView`, `ItemEnchantment`, `ItemPotion`, `ItemGuardStats`, `MarkedItemListener`,
-`LootItemOptions`, `ShulkerReadEvent`, `ShulkerReadOptions`.
+`LootItemOptions`, `ShulkerReadEvent`, `ShulkerReadOptions`, `ShulkerWriteResult`.
+
+## Storages opened by click
+
+| Export | Signature | |
+| --- | --- | --- |
+| `installHeldItem` | `(options: HeldItemOptions) => void` | An item that opens a storage when the player sneaks with it. [→](../guides/held-storage.md#installhelditemoptions) |
+| `openHeldStorage` | `(player, options: HeldStorageOptions) => Promise<boolean>` | [→](../guides/held-storage.md#openheldstorageplayer-options) |
+| `shulkerBoxSource` | `() => HeldSource` | The shulker box in hand. [→](../guides/held-storage.md#shulkerboxsource) |
+| `enderChestSource` | `() => HeldSource` | The player's ender chest. [→](../guides/held-storage.md#enderchestsource) |
+| `registerHeldSource` | `(kind, handling: HeldKind) => void` | How a kind cleans up after opens cut short: `release`, and `resume` for a player who left with the screen open. [→](../guides/held-storage.md#when-an-open-is-cut-short) |
+
+Types: `HeldSource`, `HeldWriteResult`, `HeldKind`, `HeldRelease`, `HeldResume`, `HeldReport`,
+`HeldItemOptions`, `HeldStorageOptions`, `HeldOpenOptions`, `HeldOpenEvent`.
 
 ## Host boundary
 
@@ -255,7 +271,7 @@ Types: `ItemView`, `ItemEnchantment`, `ItemPotion`, `ItemGuardStats`, `MarkedIte
 | `createTestHost` **core** | `createTestHost(options?: TestHostOptions): TestHost` | [→](../guides/testing.md#the-test-host) |
 
 Types: `HostAdapter`, `HostInteraction`, `InteractionKind` (`"take" | "place" | "swap"`), `CloseReason`
-(`"player" | "programmatic" | "invalidated" | "distance"`), `TestHost`, `TestHostOptions`,
+(`"player" | "programmatic" | "invalidated" | "distance" | "timeout"`), `TestHost`, `TestHostOptions`,
 `WriteRecord`. [Custom hosts](../guides/custom-hosts.md)
 
 ## Bedrock runtime
@@ -269,8 +285,9 @@ Types: `HostAdapter`, `HostInteraction`, `InteractionKind` (`"take" | "place" | 
 | `runMountSequence` | `(options: MountSequenceOptions) => void` | The open sequence. |
 | `classifySpawnError` | `(error) => SpawnOutcome` | `"deferred"` for a refusal in the engine's read-only window (retried next tick); `"failed"` otherwise. |
 
-Types: `OpenContainerOptions`, `ContainerSession`, `BedrockSurfaceOptions`, `MountEvent`,
-`MountSequenceOptions`, `SpawnOutcome`.
+Types: `OpenContainerOptions`, `ContainerSession`, `BedrockSurfaceOptions`, `SurfaceOpenMode`
+(`"seat" | "click"`), `SurfaceClickPoint` (`"head" | Vector3`), `MountEvent`, `MountSequenceOptions`,
+`SpawnOutcome`.
 
 ## Block containers
 
@@ -319,11 +336,11 @@ Types: `SlotProbe`, `PendingTake`, `TakeResolution`, `TrackerIO`, `ScanPassResul
 `STORAGE_ENTITY_TAG`, `ITEM_ENTITY_TYPE_ID`, `UI_ITEM_MARKER_PROPERTY`, `LEGACY_UI_ITEM_MARKER`,
 `BLOCK_KEY_PROPERTY`, `BLOCK_COMPONENT_PROPERTY`, `STORAGE_UUID_PROPERTY`, `HIDDEN_TAG`,
 `MAX_VIEW_DISTANCE`, `MOUNT_MAX_WAIT_TICKS`, `MOUNT_MAX_SPAWN_ATTEMPTS`, `SCAN_INTERVAL_TICKS`,
-`IDLE_SCAN_INTERVAL_TICKS`, `WATCHDOG_INTERVAL_TICKS`, `STORAGE_WATCH_INTERVAL_TICKS`, `PLAYER_INVENTORY_WATCH_INTERVAL_TICKS`, `openEventFor`,
+`IDLE_SCAN_INTERVAL_TICKS`, `WATCHDOG_INTERVAL_TICKS`, `CLICK_OPEN_WAIT_TICKS`, `STORAGE_WATCH_INTERVAL_TICKS`, `PLAYER_INVENTORY_WATCH_INTERVAL_TICKS`, `openEventFor`,
 `containerGroupFor`. [Constants](constants.md)
 
 ## Version
 
 | Export | |
 | --- | --- |
-| `VERSION` **core** | The library version string, such as `"1.0.0-beta.3"`. |
+| `VERSION` **core** | The library version string, such as `"1.0.0-beta.4"`. |

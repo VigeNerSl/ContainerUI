@@ -1,10 +1,11 @@
 /** The sources a storage opened by click can show: a shulker box in hand, and an ender chest. */
 
 import { ItemLockMode, type Container, type ItemStack, type Player } from "@minecraft/server";
+import { log } from "../../core/logging/logger.js";
 import { SHULKER_LOCK_PROPERTY, SHULKER_SESSION_PROPERTY } from "../constants.js";
 import { enderContainerOf, inventoryContainerOf } from "../storage/inventoryContainer.js";
 import type { HeldResume } from "./heldRecovery.js";
-import type { HeldSource } from "./heldStorage.js";
+import { isHeldKeyOpen, type HeldSource } from "./heldStorage.js";
 import { realItemsOf } from "./itemSweeps.js";
 import { isShulkerBox } from "./shulkerLeftovers.js";
 import { fillShulker, readShulkerStacks } from "./shulkerReader.js";
@@ -37,6 +38,32 @@ const unmarkIn = (container: Container | null | undefined, token: string | undef
         if (mark === undefined || (token !== undefined && mark !== token)) continue;
         unmark(stack);
         container.setItem(index, stack);
+    }
+};
+
+/**
+ * A shulker box an open marked that fell out of its owner's inventory, as on their death: each one
+ * lying near them goes back to an ordinary shulker box, its contents kept, so whoever picks it up can
+ * move and open it.
+ */
+const unmarkDropped = (player: Player, token: string): void => {
+    try {
+        const near = player.dimension.getEntities({ type: "minecraft:item", location: player.location, maxDistance: 8 });
+        near.forEach((entity) => {
+            const stack = entity.getComponent("minecraft:item")?.itemStack;
+            if (!stack || !isShulkerBox(stack.typeId) || !isMarked(stack, token)) return;
+            unmark(stack);
+            const clean = entity.dimension.spawnItem(stack, entity.location);
+            try {
+                entity.remove();
+            } catch (error) {
+                // Never two of one shulker box: the marked one stays rather than a copy beside it.
+                clean.remove();
+                throw error;
+            }
+        });
+    } catch (error) {
+        log({ level: "warn", source: "storage", message: `held-unmark-failed error=${String(error)}` });
     }
 };
 
@@ -102,11 +129,13 @@ export const shulkerBoxSource = (): HeldSource => {
                 report("not-a-shulker", held?.typeId ?? "nothing");
                 return undefined;
             }
-            // Marked by an earlier open that was cut short: what it left is settled first.
-            if (held.getDynamicProperty(SHULKER_SESSION_PROPERTY) !== undefined) {
+            // Marked by an open still under way, which settles first; a mark no open holds is a leftover.
+            const mark = held.getDynamicProperty(SHULKER_SESSION_PROPERTY);
+            if (typeof mark === "string" && isHeldKeyOpen(mark)) {
                 report("still-held", "an earlier open of this shulker box is not settled yet");
                 return undefined;
             }
+            if (mark !== undefined) unmark(held);
             token = `${player.id}:${Date.now().toString(36)}:${Math.floor(Math.random() * 1e9).toString(36)}`;
             held.setDynamicProperty(SHULKER_SESSION_PROPERTY, token);
             inventory.setItem(slot, held);
@@ -133,7 +162,9 @@ export const shulkerBoxSource = (): HeldSource => {
             return { refused: filled.refused };
         },
         release(player) {
-            if (token !== undefined) unmarkIn(inventoryContainerOf(player), token);
+            if (token === undefined) return;
+            unmarkIn(inventoryContainerOf(player), token);
+            unmarkDropped(player, token);
         },
         key: () => token,
     };

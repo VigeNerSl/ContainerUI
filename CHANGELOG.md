@@ -2,6 +2,21 @@
 
 Every public release, newest first. Breaking changes are listed under their own heading.
 
+## 1.0.0-beta.5 - 2026-10-18
+
+The shared packs are unchanged and stay at version `1.0.2`.
+
+### Fixed
+
+- **A shulker box open in hand when its owner died fell out still locked and marked.** Whoever picked
+  it up had it locked in their slot, and it never opened again. The death now ends the open, and the
+  dropped shulker box is an ordinary one again, its contents and its own lock kept. A shulker box
+  marked by an open that no longer exists opens again too.
+- **Dying with a storage open by click left the open running.** With `keepInventory` on, the shulker
+  box stayed locked in its slot until the player rejoined. The open now ends on the death with
+  `reason=died`, the last change written where the storage can still take it, and the shulker box is
+  unlocked at once.
+
 ## 1.0.0-beta.4 - 2026-10-18
 
 The shared packs are now version `1.0.2`: they add the entity behind storages opened by click, and the

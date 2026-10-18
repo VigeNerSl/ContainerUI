@@ -203,9 +203,9 @@ The UUIDs of the shared packs never change:
 
 The pack version is counted apart from the library's and goes up whenever a release changes the packs:
 `1.0.0-beta.1` shipped pack `1.0.0`, `1.0.0-beta.2` raised it to `1.0.1`, which `1.0.0-beta.3`
-keeps, and `1.0.0-beta.4` raises it to `1.0.2` for the entity behind storages opened by click. A game
-keeps a pack it has downloaded or imported under its UUID and version, so a newer pack replaces the
-old copy only when its version is higher. Your add-on still carries the library's scripts
+keeps, and `1.0.0-beta.4` raises it to `1.0.2` for the entity behind storages opened by click,
+which `1.0.0-beta.5` keeps. A game keeps a pack it has downloaded or imported under its UUID and
+version, so a newer pack replaces the old copy only when its version is higher. Your add-on still carries the library's scripts
 itself, since scripts cannot be shared between packs; only the entities and layouts are shared. Every
 pack's scripts run in a context of their own, so any number of add-ons can carry the library side by
 side.

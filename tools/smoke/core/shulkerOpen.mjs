@@ -395,15 +395,52 @@ export const checkShulkerOpen = async ({ check, load, loadEngine }) => {
             check("a kept screen loading after its wait was given up is thrown away, not written", enderSlots(ender) === "1:applex1,4:emeraldx5" && !entity.isValid, enderSlots(ender));
         }
 
-        // A shulker box an earlier open left marked does not open again until that is settled.
+        // A shulker box marked by an open that no longer exists is a leftover: it opens again.
         {
             const scene = makeScene();
             const held = shulkerHolding([new ItemStack("minecraft:diamond", 3)]);
             held.setDynamicProperty(SHULKER_SESSION_PROPERTY, "earlier-open");
+            held.setDynamicProperty(SHULKER_LOCK_PROPERTY, "none");
             held.lockMode = "slot";
-            const { player, pocket, entity } = ownerIn(scene, held);
+            const { player, pocket, entity, holder } = ownerIn(scene, held);
             const isReady = await startHeldSession({ player, source: shulkerBoxSource(), options: {} });
-            check("a shulker box still marked by an earlier open does not open", !isReady && !scene.entities.has(entity.id) && pocket.slots[0]?.getDynamicProperty(SHULKER_SESSION_PROPERTY) === "earlier-open");
+            const mark = pocket.slots[0]?.getDynamicProperty(SHULKER_SESSION_PROPERTY);
+            check("a shulker box marked by an open no longer there opens, with a mark of its own", isReady && entity.isValid && describe(holder.slots) === "0:diamondx3" && typeof mark === "string" && mark !== "earlier-open", String(mark));
+            close({ entity, player });
+            check("and closes back to its own lock", pocket.slots[0]?.lockMode === "none" && pocket.slots[0]?.getDynamicProperty(SHULKER_SESSION_PROPERTY) === undefined, pocket.slots[0]?.lockMode);
+        }
+
+        // The owner dies with the shulker box open: it falls out with what was last written, and is an
+        // ordinary shulker box again where it lies, free to be picked up, moved and opened.
+        {
+            const scene = makeScene();
+            const { player, pocket, entity, holder } = ownerIn(scene, shulkerHolding([new ItemStack("minecraft:diamond", 3)]));
+            const events = [];
+            const from = __intervals.length;
+            await startHeldSession({ player, source: shulkerBoxSource(), options: { onEvent: (event) => events.push(event.detail ?? event.kind) } });
+            open({ entity, player });
+            holder.slots[1] = new ItemStack("minecraft:apple", 2);
+            tick(from);
+            const fallen = pocket.slots[0];
+            pocket.slots[0] = undefined;
+            const drop = {
+                id: "item-1",
+                typeId: "minecraft:item",
+                isValid: true,
+                location: { ...player.location },
+                dimension: player.dimension,
+                getComponent: (id) => (id === "minecraft:item" ? { itemStack: fallen.clone() } : undefined),
+                remove() {
+                    drop.isValid = false;
+                    scene.entities.delete(drop.id);
+                },
+            };
+            scene.entities.set(drop.id, drop);
+            check("a shulker box open on death falls out marked and locked", fallen.lockMode === "slot" && typeof fallen.getDynamicProperty(SHULKER_SESSION_PROPERTY) === "string");
+            fire("after:entityDie", { deadEntity: player });
+            const clean = scene.dropped?.[0];
+            check("the death ends the open and the copy goes", !entity.isValid && events.some((event) => String(event).startsWith("reason=")), events.join(","));
+            check("the box on the ground is unmarked, with its own lock and its contents", !drop.isValid && clean?.lockMode === "none" && clean?.getDynamicProperty(SHULKER_SESSION_PROPERTY) === undefined && describe(clean?.shulkerContents) === "0:diamondx3,1:applex2", `${clean?.lockMode} ${describe(clean?.shulkerContents)}`);
         }
 
         // An ender chest not ready for a moment is written once it is, with nothing handed back meanwhile.
@@ -424,6 +461,31 @@ export const checkShulkerOpen = async ({ check, load, loadEngine }) => {
             ender.isValid = true;
             rejoin(player);
             check("back, the ender chest gets it", enderSlots(ender) === "1:applex2,4:emeraldx5" && !entity.isValid, enderSlots(ender));
+        }
+
+        // Dying with a sword in the box: the close's full write finds the box gone, as it fell out, and
+        // the open still ends as a death, with nothing handed back twice.
+        {
+            const scene = makeScene();
+            const { player, pocket, entity, holder } = ownerIn(scene, shulkerHolding([new ItemStack("minecraft:diamond_sword", 1)]));
+            const events = [];
+            await startHeldSession({ player, source: shulkerBoxSource(), options: { onEvent: (event) => events.push(event.detail ?? event.kind) } });
+            open({ entity, player });
+            pocket.slots[0] = undefined;
+            fire("after:entityDie", { deadEntity: player });
+            check("a death with a non-stackable item in the box ends as died, handing nothing back", events.at(-1) === "reason=died" && !entity.isValid && pocket.slots.every((slot) => !slot), `${events.join(",")} ${describe(pocket.slots)}`);
+        }
+
+        // The owner dies with the ender chest open: the last change is written, and the copy goes.
+        {
+            const scene = makeScene();
+            const { player, entity, holder, ender } = enderOwner(scene);
+            const events = [];
+            await startHeldSession({ player, source: enderChestSource(), options: { onEvent: (event) => events.push(event.detail ?? event.kind) } });
+            open({ entity, player });
+            holder.slots[4] = undefined;
+            fire("after:entityDie", { deadEntity: player });
+            check("dying with the ender chest open writes the last change", enderSlots(ender) === "0:diamondx3" && !entity.isValid && events.at(-1) === "reason=died", `${enderSlots(ender)} ${events.join(",")}`);
         }
 
         // A copy removed without a close ends the open: the player can open again.

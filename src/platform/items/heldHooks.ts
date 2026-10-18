@@ -6,6 +6,7 @@ import {
     type Entity,
     type EntityContainerClosedAfterEvent,
     type EntityContainerOpenedAfterEvent,
+    type EntityDieAfterEvent,
     type EntityLoadAfterEvent,
     type Player,
     type PlayerInteractWithBlockBeforeEvent,
@@ -143,6 +144,15 @@ const onPlayerJoined = (vigenersl: PlayerSpawnAfterEvent): void => {
     scheduleReturn({ playerId: player.id, delayTicks: 1 });
 };
 
+/**
+ * An owner who dies mid-open: the open ends with the last change written where the storage still can
+ * take it. A shulker box dropped on their death is unmarked where it lies.
+ */
+const onOwnerDied = (vigenersl: EntityDieAfterEvent): void => {
+    const { deadEntity } = vigenersl;
+    heldSessionFor(deadEntity.id)?.finish("died");
+};
+
 /** An owner who leaves mid-open: see `notifyOwnerLeft`. */
 const onPlayerLeft = (vigenersl: PlayerLeaveAfterEvent): void => {
     const { playerId } = vigenersl;
@@ -180,6 +190,7 @@ export const installHeldHooks = (): void => {
     subscribeUntilUninstall(world.afterEvents.entityLoad, onHeldLoaded);
     subscribeUntilUninstall(world.afterEvents.playerSpawn, onPlayerJoined);
     subscribeUntilUninstall(world.afterEvents.playerLeave, onPlayerLeft);
+    subscribeUntilUninstall(world.afterEvents.entityDie, onOwnerDied);
     const sweepRunId = system.run(cleanUpAfterRestart);
     onUninstall(() => system.clearRun(sweepRunId));
 };

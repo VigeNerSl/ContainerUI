@@ -173,8 +173,13 @@ after a restart too. Other writers to the storage are not held back meanwhile: a
 **The storage refuses the last write for 5 seconds after the close**, or the runtime is uninstalled
 mid-close: the entity is kept the same way, and written as above, at once for a player still here,
 else when they next join or the runtime is installed again. A kind with no `resume` keeps what was
-last written, and is released. A shulker box an earlier open left marked does not open until that is
-settled.
+last written, and is released.
+
+**The player dies with the screen open.** The open ends with `reason=died`: the last change is
+written where the storage can still take it, as an ender chest can, and the copy goes. A shulker box
+falls out with the rest of their items, holding what was last written, and the library turns it back
+into an ordinary shulker box where it lies, its own lock restored, so whoever picks it up can move and
+open it. A shulker box still marked by an open that no longer exists opens again as well.
 
 **A restart, a crash or a script reload.** The entity, with a copy of the items, is thrown away when it
 loads, or when a player clicks it, and nothing in it is handed out. Only this pack's entities are
@@ -208,7 +213,7 @@ registerHeldSource("backpack", {
 | `ready` | The entity is in the player's head, showing the contents (`detail`: `occupied=N`). |
 | `opened` | The player has the screen. |
 | `refused` | Items the source cannot hold went back to the player (`detail`: `slots=…`). |
-| `closed` | The open ended; the storage holds what the player left in it. `detail` gives the reason as `reason=…`: `closed` (the player closed the screen), `timeout` (no click in time), `stood-up` (stopped sneaking), `owner-left`, `uninstalled`, `entity-gone` (the copy was removed without a close), or `source-lost error=…`; ` kept-for-return` follows when the screen waits for the player's return. |
+| `closed` | The open ended; the storage holds what the player left in it. `detail` gives the reason as `reason=…`: `closed` (the player closed the screen), `timeout` (no click in time), `stood-up` (stopped sneaking), `owner-left`, `died`, `uninstalled`, `entity-gone` (the copy was removed without a close), or `source-lost error=…`; ` kept-for-return` follows when the screen waits for the player's return. |
 | `aborted` | Nothing was opened: the source could not be read or held, or the player stood up or left during the read (`detail` says why). |
 
 Records from source `storage`: `held-storage-discarded` for a copy thrown away and

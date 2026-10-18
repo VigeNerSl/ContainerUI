@@ -33,10 +33,10 @@ const BANNED_APIS = [
 const isSource = (entry) => entry.endsWith(".ts") && !entry.endsWith(".d.ts");
 const isScript = (entry) => /\.(ts|tsx|js|mjs)$/.test(entry) && !entry.endsWith(".d.ts");
 
-/** Files under `directory` that `accepts` keeps. Vendored copies of the build are skipped. */
+/** Files under `directory` that `accepts` keeps. Vendored copies of the build, hidden folders and installed packages are skipped. */
 const collectFiles = (directory, accepts) =>
     readdirSync(directory).flatMap((entry) => {
-        if (entry === "ContainerUI") return [];
+        if (entry === "ContainerUI" || entry === "node_modules" || entry.startsWith(".")) return [];
         const path = join(directory, entry);
         if (statSync(path).isDirectory()) return collectFiles(path, accepts);
         return accepts(entry) ? [path] : [];

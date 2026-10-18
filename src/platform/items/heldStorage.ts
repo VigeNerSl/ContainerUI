@@ -100,6 +100,7 @@ export interface HeldOpenOptions {
 /** What the world hooks ask of a session. */
 interface HeldHandle {
     acceptsClickFrom(playerId: string): boolean;
+    holdsKey(key: string): boolean;
     notifyOpened(): void;
     notifyOwnerLeft(): void;
     finish(reason: string): void;
@@ -144,6 +145,11 @@ class HeldSession implements HeldHandle {
     /** Whether a click by `playerId` may open the entity: only the owner's, and only while it waits for it. */
     acceptsClickFrom(playerId: string): boolean {
         return this.#state === "waiting" && playerId === this.#playerId;
+    }
+
+    /** Whether this open, not yet ended, is the one its source names `key`. */
+    holdsKey(key: string): boolean {
+        return this.#state !== "done" && this.#keyOf() === key;
     }
 
     /**
@@ -330,10 +336,12 @@ class HeldSession implements HeldHandle {
 
     /**
      * The source is gone, and with it what it held as last written: what the owner put in since goes
-     * back to them, the copy is thrown away, and the open ends.
+     * back to them, the copy is thrown away, and the open ends. On the owner's death that is expected,
+     * as a shulker box falls out with their items, and the open ends as `died`.
      */
     #endOnLostSource({ owner, container, stacks, changed, error }: { owner: Player; container: Container; stacks: readonly (ItemStack | undefined)[]; changed: readonly number[]; error: unknown }): void {
-        log({ level: "warn", source: "storage", message: `held-write-failed kind=${this.#source.kind} error=${String(error)}` });
+        const isDeath = this.#state === "closing" && this.#closeReason === "died";
+        log({ level: isDeath ? "info" : "warn", source: "storage", message: `held-write-failed kind=${this.#source.kind} error=${String(error)}` });
         container.clearAll();
         changed.forEach((index) => {
             const added = addedPart({ current: stacks[index], written: this.#written[index], signature: this.#signatures[index] });
@@ -342,7 +350,7 @@ class HeldSession implements HeldHandle {
         discardCopy(entityById(this.#entityId));
         this.#release();
         this.#forget();
-        this.#emit({ kind: "closed", detail: `reason=source-lost error=${String(error)}` });
+        this.#emit({ kind: "closed", detail: isDeath ? "reason=died" : `reason=source-lost error=${String(error)}` });
     }
 
     /**
@@ -456,6 +464,14 @@ export const discardHeldStorage = (entity: Entity): boolean => {
         return false;
     }
 };
+
+/**
+ * Whether an open not yet ended is the one a source's `key` names: a shulker box marked with a key no
+ * open holds is a leftover, free to open again.
+ *
+ * @internal Used by the shulker box source.
+ */
+export const isHeldKeyOpen = (key: string): boolean => [...sessionsByPlayerId.values()].some((session) => session.holdsKey(key));
 
 /**
  * The session an entity belongs to, for the world hooks.

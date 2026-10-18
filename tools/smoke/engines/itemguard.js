@@ -184,6 +184,7 @@ export const world = {
         entityContainerClosed: signal(),
         entityLoad: signal(),
         playerLeave: signal(),
+        entityDie: signal(),
         entityHitEntity: signal(),
         entityHitBlock: signal(),
         playerSpawn: signal(),
